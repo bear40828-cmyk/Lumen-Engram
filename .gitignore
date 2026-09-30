@@ -1,0 +1,11 @@
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+.venv/
+*.bak-*
+*.db.bak*
+*.log
+.ingest.lock
+.env*
+!.env.example

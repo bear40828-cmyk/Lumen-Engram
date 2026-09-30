@@ -1,0 +1,32 @@
+# fact_key registry (example)
+# Extractors may only pick keys from this file; unknown -> NULL.
+# cardinality: single | multi     conflict_policy: supersede | coexist
+
+education.target_school:
+  owner: user
+  cardinality: single
+  requires_self: true
+  value_type: entity
+  conflict_policy: supersede
+  patterns:
+    - '考(的是|)?(清华|北大|某大学)'
+    - '目标(院校|学校)'
+  value_pattern: '(清华|北大|某大学)'
+
+preference.color:
+  owner: user
+  cardinality: multi
+  value_type: entity
+  conflict_policy: coexist
+  patterns:
+    - '喜欢.{0,3}(红|蓝|绿|黄|粉|紫|黑|白)色'
+  value_pattern: '(红|蓝|绿|黄|粉|紫|黑|白)色'
+
+comm.format_rule:
+  owner: user
+  cardinality: multi
+  value_type: string
+  conflict_policy: coexist
+  patterns:
+    - '(纯文本|不要?用 ?[Mm]arkdown)'
+  value_pattern: '(纯文本|[Mm]arkdown)'
