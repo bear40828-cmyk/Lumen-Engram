@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import glob
 import json
 import re
@@ -6,7 +7,7 @@ import sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-SESSIONS = Path.home() / '.claude/projects/-home-ubuntu-workspace-claude'
+SESSIONS = Path(os.environ.get('ENGRAM_TRANSCRIPT_DIR', str(Path.home() / '.claude/projects')))
 CANDIDATES = ROOT / 'corrections-candidates.jsonl'
 OUT = ROOT / 'corrections.jsonl'
 RE_CHANNEL = re.compile('<channel[^>]*\\bts="([^"]+)"[^>]*>(.*?)</channel>', re.S)

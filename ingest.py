@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import datetime as dt
 import sys
 from pathlib import Path
@@ -10,7 +11,7 @@ from classify import classify
 from gate.gate import judge
 from keys import match as match_key
 from store.store import add_evidence, connect, promote, record_class, record_key, record_tier, stats
-DIGESTS = Path.home() / '.claude/projects/-home-ubuntu-workspace-claude/memory/digests'
+DIGESTS = Path(os.environ.get('ENGRAM_DIGEST_DIR', str(Path.home() / '.engram/digests')))
 
 def ingest_one(con, digest: Path) -> dict:
     jsonl_path, bullets = parse_digest(digest)

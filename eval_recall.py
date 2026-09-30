@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import argparse
 import importlib.util
 import json
@@ -10,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 from rerank import judge
 from retrieve import retrieve
 from store.store import connect
-_spec = importlib.util.spec_from_file_location('hook', Path.home() / '.claude/hooks/engram_recall.py')
+_spec = importlib.util.spec_from_file_location('hook', Path(os.environ.get('ENGRAM_HOOK_PATH', str(Path(__file__).resolve().parent / 'hooks_engram_recall.py'))))
 hook = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(hook)
 
@@ -40,7 +41,7 @@ def picked(con, text: str) -> tuple[list[str], str]:
 
 def negative(n: int) -> None:
     import glob
-    sess = Path.home() / '.claude/projects/-home-ubuntu-workspace-claude'
+    sess = Path(os.environ.get('ENGRAM_TRANSCRIPT_DIR', str(Path.home() / '.claude/projects')))
     pool = []
     for f in sorted(glob.glob(str(sess / '*.jsonl')), key=lambda p: Path(p).stat().st_mtime)[-6:]:
         for line in open(f, encoding='utf-8', errors='ignore'):
