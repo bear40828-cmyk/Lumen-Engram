@@ -92,6 +92,9 @@ def pin(con, ext_id: str, on: bool=True, *, expect_version=None) -> None:
     _bump(con, row['id'], expect_version, user_pinned=int(bool(on)))
 
 def touch(con, ext_id: str) -> None:
+    con.execute('UPDATE facts SET last_accessed=?, updated_at=? WHERE ext_id=?', (now(), now(), ext_id))
+
+def reinforce(con, ext_id: str) -> None:
     con.execute('UPDATE facts SET access_count=access_count+1, last_accessed=?, updated_at=? WHERE ext_id=?', (now(), now(), ext_id))
 
 def set_stance(con, ext_id: str, *, actor: str, stance: str, reason: str | None=None) -> None:

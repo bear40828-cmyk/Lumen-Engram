@@ -7,7 +7,7 @@ sys.path.insert(0, str(ROOT))
 from cards import cheap_enough, discover, expand
 from router import explain, route
 from telemetry import Run
-from store.store import connect, search, stats, touch
+from store.store import connect, search, stats, touch, reinforce
 WHO = {'user': '用户', 'assistant': '我', 'agent_b': '助手B', 'agent_c': '助手C'}
 
 def show(con, rows, why: bool) -> None:
