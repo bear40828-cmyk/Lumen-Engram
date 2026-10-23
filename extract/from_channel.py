@@ -12,15 +12,15 @@ from classify import classify
 from gate.gate import judge
 from keys import match as match_key
 from store.store import add_evidence, connect, promote, record_class, record_key, record_tier, stats
+
+def _pairs(v):
+    return dict((x.split(':', 1) for x in os.environ.get(v, '').split(',') if ':' in x))
 WHO = {'user': '用户', 'assistant': '我', 'agent_b': '助手B', 'agent_c': '助手C'}
 CN = dt.timezone(dt.timedelta(hours=8))
 PROJ = Path(os.environ.get('ENGRAM_TRANSCRIPT_DIR', str(Path.home() / '.claude/projects')))
 RE_CHANNEL = re.compile('<channel\\s+(?P<attrs>[^>]*?source="[^"]*telegram[^"]*"[^>]*?)>(?P<body>.*?)</channel>', re.S)
 RE_ATTR = re.compile('(\\w+)="([^"]*)"')
 RE_TAGGY = re.compile('^\\s*<[^>]+>\\s*$')
-# 身份映射从环境变量读，格式 id:role,id:role / name:role,name:role
-def _pairs(v):
-    return dict(x.split(':', 1) for x in os.environ.get(v, '').split(',') if ':' in x)
 BY_ID = _pairs('ENGRAM_CHANNEL_IDS')
 BY_NAME = _pairs('ENGRAM_CHANNEL_NAMES')
 
@@ -32,8 +32,35 @@ def whose(attrs: str) -> str:
 def beijing(iso_utc: str) -> tuple[str, str]:
     t = dt.datetime.fromisoformat(iso_utc.replace('Z', '+00:00'))
     return (t.isoformat(), t.astimezone(CN).strftime('%Y-%m-%d %H:%M'))
+NOT_HER = ('【', 'This session is being continued', '<command', '<local-command', 'Caveat:', '[Request interrupted', '<system-reminder', '<task-notification')
+RE_ATTACH = re.compile('\\(Images? also saved locally[^)]*\\)|\\(Files saved locally[^)]*\\)|\\[Image: [^\\]]*\\]|\\[\\[bear-[a-z]+\\|[^\\]]*\\]\\]|\\[图片或附件\\]', re.S)
+
+def plain_user_text(text: str) -> str:
+    t = text.strip()
+    if not t or t.startswith(NOT_HER):
+        return ''
+    t = RE_ATTACH.sub('', t)
+    t = re.sub('\\n{2,}', '\n', t).strip()
+    return t
+
+def _is_background(path: Path) -> bool:
+    with open(path, encoding='utf-8', errors='ignore') as fh:
+        for raw in fh:
+            try:
+                rec = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            msg = rec.get('message')
+            if rec.get('type') != 'user' or not isinstance(msg, dict):
+                continue
+            c = msg.get('content')
+            t = c if isinstance(c, str) else ''.join((b.get('text', '') for b in c if isinstance(b, dict) and b.get('type') == 'text')) if isinstance(c, list) else ''
+            if t.strip():
+                return t.lstrip().startswith('【后台')
+    return False
 
 def harvest(path: Path):
+    background = _is_background(path)
     with open(path, encoding='utf-8', errors='ignore') as fh:
         for line_no, raw in enumerate(fh, start=1):
             try:
@@ -46,12 +73,18 @@ def harvest(path: Path):
             role, content = (msg.get('role'), msg.get('content'))
             if role == 'user':
                 text = content if isinstance(content, str) else '\n'.join((b.get('text', '') for b in content if isinstance(b, dict) and b.get('type') == 'text')) if isinstance(content, list) else ''
+                found = False
                 for m in RE_CHANNEL.finditer(text or ''):
+                    found = True
                     body = m.group('body').strip()
                     if not body or RE_TAGGY.match(body):
                         continue
                     attrs = dict(RE_ATTR.findall(m.group('attrs')))
                     yield (line_no, whose(m.group('attrs')), body, attrs.get('ts'))
+                if not found and (not rec.get('isMeta')) and (not rec.get('isSidechain')) and (not background):
+                    body = plain_user_text(text or '')
+                    if body:
+                        yield (line_no, 'user', body, None)
             elif role == 'assistant' and isinstance(content, list):
                 for blk in content:
                     if not isinstance(blk, dict):

@@ -69,6 +69,8 @@ def rarity(con, term: str) -> int:
 
 def windows(term: str) -> list[str]:
     out = [term]
+    if term.isascii():
+        return out
     for n in (4, 3, 2):
         if len(term) > n:
             out += [term[i:i + n] for i in range(len(term) - n + 1)]
@@ -78,6 +80,7 @@ def windows(term: str) -> list[str]:
             seen.add(t)
             uniq.append(t)
     return uniq
+LIGHT_TERMS = 2
 MAX_WINDOWS = 3
 TOO_COMMON = 300
 
@@ -130,6 +133,8 @@ def retrieve(con, text: str, *, who: str | None=None, per_layer: int=6, hard_cap
             return Result(False, depth='skip', goal_rel=goal_rel, goal_why=goal_why, reason=d.reason, task_type='不查')
         d = vote
     terms = by_rarity(con, d.queries or keywords(text))
+    if d.depth == 'light':
+        terms = terms[:LIGHT_TERMS]
     task, order = classify_task(text)
     if goal_rel >= GOAL_STRONG and goal_why:
         lead = 'procedural' if goal_why.startswith('在办') else 'semantic'
@@ -210,7 +215,7 @@ def explain(r: Result) -> str:
     body = '\n'.join((line(i, st) for i, st in enumerate(r.steps)))
     tail = f'  共读 {len(r.steps)} 层，升级 {r.escalations} 次，返回 {len(r.hits)} 条'
     if r.conflicts:
-        tail += '\n  ⚠️ 打架：' + '；'.join(r.conflicts) + '\n     别挑一条顺嘴的说，要么按时间取新的那条并说清，要么直接问用户。'
+        tail += '\n  ⚠️ 打架：' + '；'.join(r.conflicts) + '\n     别挑一条顺嘴的说，要么按时间取新的那条并说清，要么直接问她。'
     return f'{head}\n{body}\n{tail}'
 
 def main() -> int:

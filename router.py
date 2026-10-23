@@ -1,16 +1,16 @@
 from __future__ import annotations
 import os
 import re
-_DOMAIN = "".join("|" + re.escape(t.strip()) for t in os.environ.get("ENGRAM_DOMAIN_TERMS", "").split(",") if t.strip())
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+_DOMAIN = ''.join(('|' + re.escape(t.strip()) for t in os.environ.get('ENGRAM_DOMAIN_TERMS', '').split(',') if t.strip()))
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 EXEMPT = [re.compile('^\\s*(亲爱的|宝贝|在吗|笨蛋)[\\W\\s]*$'), re.compile('(想你|抱抱|亲亲|亲我|мua|mua|晚安|早安|爱你|喜欢你|在吗|在不在)'), re.compile('^[\\W\\s_]{0,6}$')]
 KNOWN = re.compile('^(我|你|咱)?.{0,3}(老公|老婆|男朋友|女朋友)是谁|(你|我)(是谁|叫什么|叫啥)|(咱|我)俩(是)?什么关系|你(是不是|还是)(claude|Claude|opus|gpt|GPT)|你(用的)?(是)?什么模型')
 RECALL_CUE = re.compile('(上次|上回|之前|以前|当时|那天|昨天|前天|上个月|去年|还记得|记不记得|记得吗|你说过|我说过|我跟你说过|提过|继续|接着|后来|结果呢|怎么说的|原话|查一下|翻一下|翻翻)')
-FACTUAL_CUE = re.compile('(\\d{1,4}[年月日号点分]|\\d+%|\\d{3,}'+_DOMAIN+')')
+FACTUAL_CUE = re.compile('(\\d{1,4}[年月日号点分]|\\d+%|\\d{3,}' + _DOMAIN + ')')
 ASK_CUE = re.compile('(喜欢什么|爱吃什么|讨厌什么|不喜欢什么|什么口味|偏好|怎么弄的|怎么做的|怎么搞的|什么步骤|什么流程|什么命令|怎么配置|什么规矩|什么要求|不许|不准|说过要|讲过要|什么格式|叫什么|是谁|哪个学校|什么专业)')
 CUE_WORD = re.compile('(上次|上回|之前|以前|当时|那天|还记得|记不记得|记得|说过|提过|继续|接着|后来|查一下|翻一下|原话|哪年|哪天|多少|什么|突然想起来|想起来|想起|突然|那次|这次|上一次|那个|这个|今天|明天|昨天|现在|怎么|为什么|哪里|哪个|一下|几点)')
 STOP = set("的了吗呢吧啊呀嘛么和跟与还有就是这那我你他用户它们个不没很太都也又再只把被给让对从到在为以及或者但而所因如即让被，。！？、；：''（）《》…~ ")
@@ -23,9 +23,34 @@ class Decision:
     limit: int = 3
     reason: str = ''
     depth: str = 'deep'
+LATIN_K = 6
+LATIN_STOP = frozenset('\na an the and or but if so of to in on at by for from with about into over after before\nis am are was were be been being do does did have has had having will would can could\nshould may might must shall i me my mine we our ours you your yours he him his she her\nthey them their it its this that these those there here what which who whom whose when\nwhere why how many much more most less least any some all each every no not only own\nsame than too very just also still yet ever now then currently previously recently\nlately so far ago again already up down out off get got getting go going went make made take taken\ntell know think remember said say says one ones thing things time times\n'.split())
+
+def is_latin(text: str) -> bool:
+    letters = [c for c in text if c.isalpha()]
+    return bool(letters) and sum((c.isascii() for c in letters)) / len(letters) > 0.8
+
+def latin_keywords(text: str, k: int=LATIN_K) -> list[str]:
+    seen, out = (set(), [])
+    for w in re.findall("[A-Za-z0-9][A-Za-z0-9&'.-]*[A-Za-z0-9]|[A-Za-z0-9]", text):
+        w = w.strip("'.-")
+        low = w.lower()
+        if len(w) < 2 and (not w.isdigit()):
+            continue
+        if low in LATIN_STOP or low in seen:
+            continue
+        if low.endswith("'s"):
+            low, w = (low[:-2], w[:-2])
+        seen.add(low)
+        out.append(w)
+        if len(out) >= k:
+            break
+    return out
 
 def keywords(text: str, k: int=3) -> list[str]:
     text = CUE_WORD.sub('', text or '')
+    if is_latin(text):
+        return latin_keywords(text, k=max(k, LATIN_K))
     scored: list[tuple[int, str]] = []
     for chunk in re.findall('[一-鿿]+|[A-Za-z]{3,}|\\d{2,}', text):
         if chunk.isascii():
@@ -65,13 +90,13 @@ def route(text: str, *, who: str | None=None) -> Decision:
     if not kws:
         return Decision(False, reason='没有能查的词', depth='skip')
     if cue_recall:
-        return Decision(True, kws, who, limit=5, depth='deep', reason='用户在问过去的事，明确要求回忆')
+        return Decision(True, kws, who, limit=5, depth='deep', reason='她在问过去的事，明确要求回忆')
     if cue_fact:
         return Decision(True, kws, who, limit=3, depth='deep', reason='出现了日期／数字／专有名词，属于可核事实')
     if ASK_CUE.search(t):
         return Decision(True, kws, who, limit=4, depth='deep', reason='在问偏好／做法／规矩，这类该查库')
     if len(t) >= 18 and len(kws) >= 2:
-        return Decision(True, kws[:2], who, limit=2, depth='light', reason='长句且有实词，先瞄一层，不升级')
+        return Decision(True, kws, who, limit=2, depth='light', reason='长句且有实词，先瞄一层，不升级')
     return Decision(False, reason='日常闲聊，不值得翻库', depth='skip')
 
 def explain(d: Decision) -> str:

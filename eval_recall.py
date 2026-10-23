@@ -16,25 +16,38 @@ hook = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(hook)
 
 def picked(con, text: str) -> tuple[list[str], str]:
-    if hook.skip_input(text):
+    current = text.rsplit('\n', 1)[-1]
+    if hook.skip_input(current):
         return ([], '跳过输入')
-    marks = hook.distinctive_terms(text)
-    if not marks and (not hook.EXPLICIT_RECALL.search(text)) and (not hook.QUESTION.search(text)):
+    if hook.pre_recall_skip(current):
+        return ([], '转述／玩笑')
+    if '\n' in text:
+        search_text = text
+    else:
+        search_text, _ = hook.contextual_query({'prompt': current}, current)
+    marks = hook.distinctive_terms(search_text)
+    if not marks and (not hook.EXPLICIT_RECALL.search(current)) and (not hook.QUESTION.search(current)):
         return ([], '无指向词')
-    r = retrieve(con, text, who=None)
-    pinned = hook.pinned_candidates(con, text)
-    if not r.should_recall and (not pinned or '软话' in (r.reason or '')):
+    r = retrieve(con, search_text, who=None)
+    pinned = hook.pinned_candidates(con, search_text)
+    contextual = hook.contextual_candidates(con, search_text)
+    if not r.should_recall and (not pinned and (not contextual) or '软话' in (r.reason or '')):
         return ([], f'路由不查:{r.reason}')
-    seen = {p['ext_id'] for p in pinned}
-    hits = pinned + [h for h in (r.hits if r.should_recall else []) if h.get('ext_id') not in seen]
+    seen = {p['ext_id'] for p in pinned + contextual}
+    hits = pinned + contextual + [h for h in (r.hits if r.should_recall else []) if h.get('ext_id') not in seen]
     if not hits:
         return ([], '检索无结果')
-    j = judge(text, [h.get('content') or '' for h in hits])
+    j = judge(search_text, [h.get('content') or '' for h in hits])
+    deterministic = [h for h in hits if hook.deterministic_relevance(search_text, h.get('content') or '')]
     if j is None:
-        return ([], '精排失败')
-    if not j['need']:
+        return ([h.get('content') or '' for h in deterministic[:hook.MAX_HITS]], '精排失败，规则兜底' if deterministic else '精排失败')
+    forced = [i for i, h in enumerate(hits) if hook.deterministic_relevance(search_text, h.get('content') or '')]
+    if not j['need'] and (not forced):
         return ([], '精排判不用查')
-    top = [hits[i] for sc, i in sorted(zip(j['scores'], range(len(hits))), reverse=True) if sc >= 7][:hook.MAX_HITS]
+    if forced:
+        top = [hits[i] for i in forced[:hook.MAX_HITS]]
+    else:
+        top = [hits[i] for sc, i in sorted(zip(j['scores'], range(len(hits))), reverse=True) if sc >= 7 and hook.entity_compatible(search_text, hits[i].get('content') or '')][:hook.MAX_HITS]
     if not top:
         return ([], '精排不够分' + ('' if pinned else '（纠正层没捞到）'))
     return ([h.get('content') or '' for h in top], '塞了别的' + ('' if pinned else '（纠正层没捞到）'))
