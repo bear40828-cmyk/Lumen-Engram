@@ -112,7 +112,7 @@ def search(con, query: str, *, subject=None, limit=10, include_disowned=False, f
             table = 'facts_fts'
         conds.append(f'f.id IN (SELECT rowid FROM {table} WHERE {table} MATCH ?)')
         margs.append('"%s"' % t.replace('"', '""'))
-    sql = f"\n      SELECT f.ext_id, f.subject, f.content, f.status, f.importance, f.confidence,\n             f.user_pinned, f.access_count, f.last_accessed, f.valid_from,\n             COALESCE(cs.stance, 'none') AS my_stance,\n             engram_activation(f.importance, f.confidence, f.emotion, f.access_count,\n                               julianday('now') - julianday(f.valid_from),\n                               f.user_pinned, f.fact_type) AS score,\n             f.layer\n      FROM facts f\n      LEFT JOIN current_stances cs ON cs.fact_id = f.id AND cs.actor = 'claude'\n      WHERE {' AND '.join(conds)}\n        AND f.status IN ('candidate','confirmed')\n        AND f.valid_to IS NULL\n    "
+    sql = f"\n      SELECT f.ext_id, f.subject, f.content, f.status, f.importance, f.confidence,\n             f.user_pinned, f.access_count, f.last_accessed, f.valid_from,\n             COALESCE(cs.stance, 'none') AS my_stance,\n             engram_activation(f.importance, f.confidence, f.emotion, f.access_count,\n                               julianday('now') - julianday(f.valid_from),\n                               f.user_pinned, f.fact_type) AS score,\n             f.layer\n      FROM facts f\n      LEFT JOIN current_stances cs ON cs.fact_id = f.id AND cs.actor = 'assistant'\n      WHERE {' AND '.join(conds)}\n        AND f.status IN ('candidate','confirmed')\n        AND f.valid_to IS NULL\n    "
     args: list = list(margs)
     if subject:
         sql += ' AND f.subject = ?'
