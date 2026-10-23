@@ -38,7 +38,7 @@ def main() -> int:
     ap.add_argument('-n', '--limit', type=int, default=8)
     ap.add_argument('--why', action='store_true', help='带出处，追到原文哪一行')
     ap.add_argument('--all', action='store_true', help='连我标过「不认」的也列出来')
-    ap.add_argument('--pinned', action='store_true', help='列出用户钉住的')
+    ap.add_argument('--pinned', action='store_true', help='列出她钉住的')
     ap.add_argument('--stats', action='store_true')
     ap.add_argument('--auto', metavar='消息原文', help='交给 Router 决定该不该查、查什么、读多少')
     ap.add_argument('--expand', type=int, default=2, help='发现层命中后展开几条全文，默认 2；0 表示只看卡片')
@@ -90,7 +90,7 @@ def main() -> int:
                 print(f'\n  展开前 {len(chosen)} 条：')
                 for row in expand(con, chosen):
                     print(f'  · {row['content']}')
-                    touch(con, row['ext_id'])
+                    reinforce(con, row['ext_id'])
                 con.commit()
                 used = card_chars + sum((len(r['content']) for r in expand(con, chosen)))
             else:

@@ -7,7 +7,7 @@ sys.path.insert(0, str(ROOT))
 from cards import cheap_enough, discover, expand
 from router import route
 from telemetry import Run
-from store.store import connect, search, set_stance, pin, stats, touch
+from store.store import connect, search, set_stance, pin, stats, touch, reinforce
 WHO = {'user': '用户', 'assistant': '助手', 'agent_b': '助手B', 'agent_c': '助手C'}
 TOOLS = [{'name': 'engram_recall', 'description': '查长期记忆。只返回当下有效的事实，作废的和我标过「不认」的不出现。两个字的词也能查。带 why=true 会附上原始文件和行号。', 'inputSchema': {'type': 'object', 'properties': {'query': {'type': 'string', 'description': '查询词，至少两个字'}, 'who': {'type': 'string', 'enum': list(WHO), 'description': '只看谁说的：user=用户 assistant=我 agent_b=助手B agent_c=助手C'}, 'limit': {'type': 'integer', 'description': '最多几条，默认 8'}, 'why': {'type': 'boolean', 'description': '是否附出处（文件+行号+核对状态）'}}, 'required': ['query']}}, {'name': 'engram_route', 'description': '把用户这句原话交给 Router：它决定该不该翻记忆库、查什么词、读几条，并直接把召回结果带回来。用户抛软话或撒娇时会明确回「不查」。', 'inputSchema': {'type': 'object', 'properties': {'text': {'type': 'string', 'description': '用户这句话的原文'}, 'who': {'type': 'string', 'enum': list(WHO)}}, 'required': ['text']}}, {'name': 'engram_think', 'description': '分层召回（router-0.2）：先判这是哪类问题、该叫醒哪类记忆，查一层就停下来判「够不够」——问句要的是年份／数字／人／地点而命中里没有，就自己升级去查下一层。答不上会直说答不上，不硬凑。问过去的事、问偏好、问做法、问规矩，都用这个，别用 engram_recall。', 'inputSchema': {'type': 'object', 'properties': {'text': {'type': 'string', 'description': '用户这句话的原文'}, 'who': {'type': 'string', 'enum': list(WHO)}}, 'required': ['text']}}, {'name': 'engram_wm', 'description': '工作记忆：此刻手上是什么事（目标／在办／话题／状态／用户的情绪）。换窗口后第一件事就该看这个——上一个窗口还有什么没办完都在里面。不带参数是查看；带 kind+content 是记一条；带 done/drop 是关掉一条。', 'inputSchema': {'type': 'object', 'properties': {'kind': {'type': 'string', 'enum': ['goal', 'task', 'topic', 'state', 'emotion'], 'description': 'goal=目标 task=在办 topic=话题 state=临时状态 emotion=用户的情绪'}, 'content': {'type': 'string', 'description': '记什么'}, 'done': {'type': 'integer', 'description': '把这个编号标成办完了'}, 'drop': {'type': 'integer', 'description': '把这个编号标成不做了'}, 'snapshot': {'type': 'boolean', 'description': 'true 就给一段能直接贴进新窗口的现状'}}}}, {'name': 'engram_expand', 'description': '把某条记忆的全文读出来。发现层只给 40 字卡片，确认这条有用再展开——省上下文用的。', 'inputSchema': {'type': 'object', 'properties': {'ext_id': {'type': 'string'}}, 'required': ['ext_id']}}, {'name': 'engram_stats', 'description': '看长期记忆库现在有多少证据、多少事实、多少条是用户钉住的。', 'inputSchema': {'type': 'object', 'properties': {}}}, {'name': 'engram_stance', 'description': '对某条记忆表态：own 认下 / disown 不认 / suspend 悬置。原文不动，改主意就再表一次，历史留痕。', 'inputSchema': {'type': 'object', 'properties': {'ext_id': {'type': 'string'}, 'stance': {'type': 'string', 'enum': ['own', 'disown', 'suspend']}, 'reason': {'type': 'string'}}, 'required': ['ext_id', 'stance']}}, {'name': 'engram_pin', 'description': '钉住一条记忆（用户明确要求长期保留的）。钉住的不参与衰减和冷层迁移。', 'inputSchema': {'type': 'object', 'properties': {'ext_id': {'type': 'string'}, 'on': {'type': 'boolean', 'description': 'false 取消钉住'}}, 'required': ['ext_id']}}]
 
@@ -61,7 +61,7 @@ def handle(method: str, params: dict, con) -> dict:
                 for i, st in enumerate(r.steps, 1):
                     lines.append(f'  {i}. {TYPE_CN.get(st.layer, st.layer)}层 命中 {st.hits} 条，信心 {st.fok:.2f} → {('停手' if st.enough else '升级')}（{st.reason}）')
                 if not r.hits:
-                    lines.append('查不到。别硬凑，这种就直接跟用户说没有。')
+                    lines.append('查不到。别硬凑，这种就直接跟她说没有。')
                 for h in r.hits[:8]:
                     lines.append(f'  · [{h['subject']}] {h['content'][:120]}')
                     touch(con, h['ext_id'])
@@ -96,6 +96,9 @@ def handle(method: str, params: dict, con) -> dict:
         elif name == 'engram_expand':
             row = con.execute('SELECT content, subject, status, layer FROM facts WHERE ext_id=?', (a['ext_id'],)).fetchone()
             text = row[0] if row else f'没有这条：{a['ext_id']}'
+            if row:
+                reinforce(con, a['ext_id'])
+                con.commit()
         elif name == 'engram_stats':
             s = stats(con)
             text = f'证据 {s['evidence']} 条（核对通过 {s['evidence_verified']}）\n事实 {s['facts_by_status']}\n当下有效 {s['live']}｜钉住 {s['pinned']}'
