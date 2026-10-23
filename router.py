@@ -11,6 +11,8 @@ EXEMPT = [re.compile('^\\s*(亲爱的|宝贝|在吗|笨蛋)[\\W\\s]*$'), re.comp
 KNOWN = re.compile('^(我|你|咱)?.{0,3}(老公|老婆|男朋友|女朋友)是谁|(你|我)(是谁|叫什么|叫啥)|(咱|我)俩(是)?什么关系|你(是不是|还是)(claude|Claude|opus|gpt|GPT)|你(用的)?(是)?什么模型')
 RECALL_CUE = re.compile('(上次|上回|之前|以前|当时|那天|昨天|前天|上个月|去年|还记得|记不记得|记得吗|你说过|我说过|我跟你说过|提过|继续|接着|后来|结果呢|怎么说的|原话|查一下|翻一下|翻翻)')
 FACTUAL_CUE = re.compile('(\\d{1,4}[年月日号点分]|\\d+%|\\d{3,}' + _DOMAIN + ')')
+CALC = re.compile('(\\d+(?:\\.\\d+)?\\s*(?:乘以|乘|除以|加上|加|减去|减|[×xX*/+\\-^])\\s*\\d+|(?:\\d{2,4}\\s*年\\s*)?\\d{1,2}\\s*月(?:份)?有?(?:多少|几)天|等于多少|是多少$|几次方|平方根|开根号)')
+PERSON = re.compile('[我你咱她他俩]|用户|老公|助手')
 ASK_CUE = re.compile('(喜欢什么|爱吃什么|讨厌什么|不喜欢什么|什么口味|偏好|怎么弄的|怎么做的|怎么搞的|什么步骤|什么流程|什么命令|怎么配置|什么规矩|什么要求|不许|不准|说过要|讲过要|什么格式|叫什么|是谁|哪个学校|什么专业)')
 CUE_WORD = re.compile('(上次|上回|之前|以前|当时|那天|还记得|记不记得|记得|说过|提过|继续|接着|后来|查一下|翻一下|原话|哪年|哪天|多少|什么|突然想起来|想起来|想起|突然|那次|这次|上一次|那个|这个|今天|明天|昨天|现在|怎么|为什么|哪里|哪个|一下|几点)')
 STOP = set("的了吗呢吧啊呀嘛么和跟与还有就是这那我你他用户它们个不没很太都也又再只把被给让对从到在为以及或者但而所因如即让被，。！？、；：''（）《》…~ ")
@@ -79,12 +81,14 @@ def route(text: str, *, who: str | None=None) -> Decision:
     t = (text or '').strip()
     if not t:
         return Decision(False, reason='空消息', depth='skip')
+    cue_recall = bool(RECALL_CUE.search(t))
     for pat in EXEMPT:
-        if pat.search(t) and len(t) <= 24:
+        if pat.search(t) and len(t) <= 24 and (not cue_recall):
             return Decision(False, depth='skip', reason='软话／叫人／表情：这时候要的是接住，不是查资料')
     if KNOWN.search(t) and len(t) <= 20:
         return Decision(False, depth='skip', reason='这个我本来就知道，不用翻库')
-    cue_recall = bool(RECALL_CUE.search(t))
+    if CALC.search(t) and (not cue_recall) and (not PERSON.search(t)):
+        return Decision(False, depth='skip', reason='计算／常识题，跟记忆无关')
     cue_fact = bool(FACTUAL_CUE.search(t))
     kws = keywords(t)
     if not kws:
