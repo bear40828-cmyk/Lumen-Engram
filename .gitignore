@@ -1,0 +1,48 @@
+# --- personal data / runtime data: never commit ---
+# databases and backups
+*.db
+*.db-*
+*.db.*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.bak
+*.bak-*
+*.backup
+*.dump
+*.sql.gz
+backup/
+backups/
+archive/
+# chat / corpus / correction data
+*.jsonl
+*.ndjson
+corrections*.jsonl
+recall-cases.md
+spec/
+# notes vault, window summaries and agent talk notes
+obsidian-vault/
+handoff-ro/
+TALK-*/
+TALK*.md
+# secrets, persona and local deployment config
+.env
+.env*
+*.env
+persona.env
+keys.local.yaml
+prompt-glossary*.txt
+*.pem
+*.key
+# logs and locks
+*.log
+*.lock
+.ingest.lock
+# python / venv
+__pycache__/
+*.pyc
+.venv/
+# reference docs dumps
+refs-*
+!.env.example
+!persona.env.example

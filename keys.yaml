@@ -1,0 +1,104 @@
+# Lumen Engram · fact_key registry（通用示例）
+#
+# 规矩：
+#   1. extractor **不许自己造 key**，只能从这份表里选；选不到就留 NULL
+#   2. key 里不编 subject —— subject 已经单独一列了
+#   3. 从第一天就带 cardinality 和 conflict_policy：新事实来了，到底该覆盖旧的还是并存
+#   4. 某种 NULL 模式反复出现，audit 提 candidate_key，人工审过再正式加进来
+#
+# 真实部署的表（带个人信息）放在 keys.local.yaml（已 .gitignore，优先于本文件），
+# 或用环境变量 ENGRAM_KEYS_FILE 指过去。owner: user 会被换成 persona.USER（库里人类说话人的标签）。
+#
+# cardinality:      single = 同一 subject 只该有一个当前值 | multi = 可以并存
+# conflict_policy:  supersede = 新值作废旧值 | coexist = 并存
+# value_type:       entity / string / enum / number / date
+# patterns:         命中就认这个 key（正则）
+# value_pattern:    从正文里抠出「值」，用于巩固时判断方向一致；没有就不参与自动巩固
+
+education.target_school:
+  owner: user
+  cardinality: single
+  requires_self: true      # 本人说「我考某大学」才算；转述不算
+  value_type: entity
+  conflict_policy: supersede
+  patterns:
+    - '考(的是|)?(清华|北大|某大学)'
+    - '报(考|)?(清华|北大|某大学)'
+    - '目标(院校|学校)'
+  value_pattern: '(清华|北大|某大学)'
+
+education.exam_subject:
+  owner: user
+  cardinality: multi
+  value_type: entity
+  conflict_policy: coexist
+  digit_boundary: true     # 「301」不能从手机号里抠出来
+  patterns:
+    - '(数据结构|数据库|操作系统|计算机网络).{0,6}(\d+%|占)'
+  value_pattern: '(数据结构|数据库|操作系统|计算机网络)'
+
+education.graduation:
+  owner: user
+  cardinality: single
+  requires_self: true
+  value_type: date
+  conflict_policy: supersede
+  patterns:
+    - '(明年|\d{4}年)?(六月|6月).{0,4}毕业'
+    - '毕业(时间|了吗)'
+  value_pattern: '(明年|\d{4}年)?(六月|6月)'
+
+person.pet:
+  owner: user
+  cardinality: multi
+  value_type: entity
+  conflict_policy: coexist
+  requires_self: true      # 本人的宠物；别人提一句不算「别人养的」
+  patterns:
+    - '养了?(只|条)?(猫|狗)'
+  value_pattern: '(猫|狗)'
+
+preference.color:
+  owner: user
+  cardinality: multi
+  value_type: string
+  conflict_policy: coexist
+  requires_self: true      # 「你这么喜欢紫色」说的是对方，不是本人
+  patterns:
+    - '(喜欢|不喜欢|讨厌).{0,4}(粉|紫|绿|蓝|红|黑|白)色'
+    - '(粉|紫|绿|蓝|红|黑|白)色.{0,4}(好看|难看|不喜欢)'
+  value_pattern: '(粉色|紫色|绿色|蓝色|红色|黑色|白色)'
+
+preference.food:
+  owner: user
+  cardinality: multi
+  value_type: string
+  conflict_policy: coexist
+  requires_self: true
+  patterns:
+    - '(爱吃|想吃|喜欢吃|不爱吃|吃不了)'
+    - '(汤面|奶茶|泡芙|冰红茶|可乐).{0,6}(好吃|喜欢|想)'
+  value_pattern: '(汤面|奶茶|泡芙|冰红茶|可乐)'
+
+comm.format_rule:
+  owner: user
+  cardinality: single
+  value_type: string
+  conflict_policy: supersede
+  patterns:
+    - '纯文本'
+    - '(别|不要|不许).{0,6}(markdown|加粗|星号)'
+    - '分气泡'
+  value_pattern: '(纯文本|分气泡)'
+
+project.status:
+  consolidatable: false   # 值里不含项目名，"停了"这种抽象出来没意义
+  cardinality: single
+  value_type: enum
+  conflict_policy: supersede
+  # supersede 的 key 宁可少收也不能乱收，否则会拿无关的话去作废真事实。
+  # 所以必须同时出现一个项目名词。
+  patterns:
+    - '(engram|看板|摘要层|通道|服务|systemd|插件|脚本|项目|watchdog).{0,12}(上线|跑通|做完|冻结|停了|卸了|disable|部署好)'
+    - '(上线|跑通|做完|冻结|停了|卸了|部署好).{0,12}(engram|看板|摘要层|通道|服务|systemd|插件|脚本|项目)'
+  value_pattern: '(上线|跑通|做完|冻结|停了|卸了|部署好)'
