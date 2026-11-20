@@ -1,0 +1,4 @@
+pyyaml
+numpy
+# 仅 --xrerank local 需要（会从 Hugging Face 下载 BAAI/bge-reranker-v2-m3，约 2.3 GB）
+# sentence-transformers
