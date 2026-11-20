@@ -214,7 +214,11 @@ def answer(item: dict, hits: list, mock: bool) -> str:
         return strip_thinking(hits[-1][1][:200]) if hits else "I don't know."
     ctx = "\n\n".join(f"[{d}] {c[:1500]}" for d, c in sorted(hits)) or "(nothing retrieved)"
     return strip_thinking(chat("You are answering a question about the user's own past, using only these retrieved memory snippets "
-                "(the user's past messages, with dates). If facts changed over time, use the most recent. "
+                "(the user's past messages, with dates). Rules: (1) When several snippets describe the same fact with "
+                "different values, use the one with the LATEST date; ignore snippets marked 【较早版本，可能已被更新】 "
+                "when a newer snippet gives a different value. (2) If the latest snippet adds to an older number "
+                "(e.g. first 37, later one more added), add them up instead of repeating the old number. "
+                "(3) Do not answer with an old value, and do not hedge between the old and new values. "
                 f"Today is {item['question_date']}.\n\nSnippets:\n{ctx}\n\nQuestion: {item['question']}\n"
                 "Answer concisely. If the snippets don't contain it, say you don't know."))
 

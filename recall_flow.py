@@ -240,7 +240,7 @@ def _blocked_stem_compounds(text: str) -> list[str]:
 
 
 # ── 新旧顶替（召回时算，不靠入库时打标） ──────────────────────────────────────
-_RECENCY_STOP = set("the a an and or of to in on for with is are was were be been it its this that what how when where who which do does did i you he she we they my your his her our their me him us them have has had will would can could should may might just really very also then than so as at by from about into over after before".split())
+_RECENCY_STOP = set("the a an and or of to in on for with is are was were be been it its this that what how when where who which do does did i you he she we they my your his her our their me him us them have has had will would can could should may might just really very also then than so as at by from about into over after before currently recently now today yesterday tomorrow still already".split())
 
 
 def _key_words(text: str) -> set[str]:
@@ -267,11 +267,19 @@ def superseded_map(pool: list[dict], query: str) -> dict[str, str]:
             df[w] = df.get(w, 0) + 1
 
     def distinctive(w: str) -> bool:
-        return len(w) > 2 and df.get(w, 0) <= max(2, int(0.3 * n))
+        return len(w) > 2 and df.get(w, 0) <= max(2, int(0.5 * n))
 
     qterms = {w for w in re.findall(r"[a-z0-9']+", (query or "").lower()) if distinctive(w)}
     if not qterms:
         return {}
+    # 锚词：问题里在本池中出现最少的词（最能代表“这件事”本身，如 Fitbit 之于健身追踪问题）。
+    # 分组必须共享锚词，否则“currently/taking”这类泛词一共享就会把毫不相关的事实分到一组
+    # （实测：不加锚词时，国会新闻会被分进拖鞋组、轮胎会被分进 Instagram 组）。
+    # df 为 0 的词不在任何事实里出现，当不了锚词。
+    cand = [w for w in qterms if df.get(w, 0) > 0]
+    if not cand:
+        return {}
+    anchor = sorted(cand, key=lambda w: (df.get(w, 0), -len(w), w))[0]
 
     def key_sents(h: dict) -> list[set[str]]:
         out = []
@@ -293,10 +301,14 @@ def superseded_map(pool: list[dict], query: str) -> dict[str, str]:
     for i in range(len(pool)):
         for j in range(i + 1, len(pool)):
             shared = 0
+            anchored = False
             for sa in keys[i]:
                 for sb in keys[j]:
-                    shared = max(shared, len(sa & sb))
-            if shared >= 2:
+                    inter = sa & sb
+                    shared = max(shared, len(inter))
+                    if anchor in inter:
+                        anchored = True
+            if shared >= 2 and anchored:
                 ra, rb = find(i), find(j)
                 if ra != rb:
                     parent[ra] = rb
