@@ -24,7 +24,7 @@ Lumen Engram 的设计目标，就是让这三件事在结构上难以发生，�
 - **该不该查，先判再查。** 召回前先由路由判断这句话需不需要翻记忆、查什么、查多深；寒暄、撒娇、纯计算题直接跳过。命中的候选再经交叉编码器（bge-reranker-v2-m3）精排，低于最低分阈值的不注入。
 - **混合召回。** 关键词（FTS5 三字/二字双索引）+ 向量（bge-m3）候选，用倒数排名融合（RRF）合并；向量服务不可用时自动退回关键词。
 - **密钥打码。** 入库前、送模型前、注入对话前都过一道脱敏，覆盖常见 API key、GitHub token、Bark 推送地址等，没有关闭开关。
-- **可视化与人工校对。** 可把全部事实导出为 Obsidian 仓库，在手机或电脑上浏览，勾选即可把错误记忆收起，同步回服务器生效。
+- **可视化与人工校对。** 可把全部事实导出为 Obsidian 仓库，在手机或电脑上浏览，勾选即可把错误记忆收起，或一键钉住重要记忆（提升为已确认），同步回服务器生效。
 
 ## 功能一览
 
@@ -63,7 +63,7 @@ Lumen Engram 的设计目标，就是让这三件事在结构上难以发生，�
 | 动态显著性 | 时间衰减 + 重复强化 + 冷热分层，只影响好不好想起，不决定存不存在 | `salience.py` `maintain.py` |
 | 夜间归纳 | 相近记忆聚类，归纳成一条抽象记忆，只认本人原话 | `maintenance/cluster_summarize.py` |
 | 原子拆分 | 早期整段入库的旧事实按批拆开，可整批撤回 | `maintenance/split_atomic.py` |
-| Obsidian 导出与收回 | 导出为可浏览的笔记仓库，勾选即收起错误记忆 | `maintenance/obsidian_export.py` `obsidian_collect.py` |
+| Obsidian 导出与收回 | 导出为可浏览的笔记仓库，勾选即收起错误记忆；每条事实下另有「钉住」复选框，勾上即提升为已确认并追加一条人工确认证据，可整批撤回 | `maintenance/obsidian_export.py` `obsidian_collect.py` |
 | 召回遥测 | 记录每次召回的候选、注入与反馈，可回放分析 | `telemetry.py` |
 | 审计与评测 | 晋升率审计、重复报告、召回评测（原题 / 换说法 / 反面卷） | `audit.py` `dup_report.py` `eval_recall.py` |
 | 开窗交接 | 新窗口注入上一窗口的交接摘要 | `hooks_handoff_inject.py` |
@@ -302,9 +302,9 @@ python3 -m unittest discover -s tests -t .
 
 ## 路线
 
-- [ ] 打包为 DeepSeek Harness（DSH）原生插件，装上即用
-- [ ] Obsidian 端支持一键钉住
 - [ ] 交接摘要独立成库，与事实库分开检索
+- [ ] 打包为 Docker 镜像，一条命令部署
+- [ ] 打包为 DeepSeek Harness（DSH）原生插件，装上即用
 
 ## 许可
 
