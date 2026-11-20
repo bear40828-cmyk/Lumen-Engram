@@ -39,7 +39,7 @@ def _creds() -> tuple[str, str] | None:
             if m:
                 env[m.group(1)] = m.group(2).strip("\"'")
     except OSError:
-        return None
+        pass  # .env.jev 不存在时继续用环境变量，不要直接返回 None
     tok = os.environ.get("CF_API_TOKEN") or env.get("CF_API_TOKEN")
     acct = os.environ.get("CF_ACCOUNT_ID") or env.get("CF_ACCOUNT_ID")
     return (tok, acct) if tok and acct else None

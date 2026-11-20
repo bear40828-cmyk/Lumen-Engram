@@ -29,6 +29,29 @@ DATA = [
 ]
 
 
+class CredsTests(unittest.TestCase):
+    """_creds()：.env.jev 不存在时，环境变量里的 key 也要能读到（此前会直接 return None，导致 --vectors 静默跑成纯关键词）。"""
+
+    def test_env_vars_used_when_dotenv_missing(self):
+        import os
+        from unittest import mock
+
+        import vectors as V
+        with mock.patch.dict(os.environ, {"CF_API_TOKEN": "tok-x", "CF_ACCOUNT_ID": "acct-x"}):
+            with mock.patch.object(V, "ENV", Path("/nonexistent/.env.jev")):
+                self.assertEqual(V._creds(), ("tok-x", "acct-x"))
+
+    def test_none_when_nothing_anywhere(self):
+        import os
+        from unittest import mock
+
+        import vectors as V
+        env = {k: v for k, v in os.environ.items() if k not in ("CF_API_TOKEN", "CF_ACCOUNT_ID")}
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(V, "ENV", Path("/nonexistent/.env.jev")):
+                self.assertIsNone(V._creds())
+
+
 class StripThinkingTests(unittest.TestCase):
     def setUp(self):
         sys.path.insert(0, str(REPO / "eval/longmemeval"))
