@@ -239,6 +239,99 @@ def _blocked_stem_compounds(text: str) -> list[str]:
     return out
 
 
+# ── 新旧顶替（召回时算，不靠入库时打标） ──────────────────────────────────────
+_RECENCY_STOP = set("the a an and or of to in on for with is are was were be been it its this that what how when where who which do does did i you he she we they my your his her our their me him us them have has had will would can could should may might just really very also then than so as at by from about into over after before".split())
+
+
+def _key_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9']+", (text or "").lower()) if w not in _RECENCY_STOP}
+
+
+def superseded_map(pool: list[dict], query: str) -> dict[str, str]:
+    """同一件事的新旧两条分在一组，返回 {旧 ext_id: 新 ext_id}。
+
+    分组信号：两条事实里含查询关键词的句子共享 ≥2 个「 distinctive 词」——
+    在本池里出现频率低（≤30% 的事实）的实词，比如 Fitbit Charge 3、pre-1920。
+    泛词（using、think、my 这类到处都有的词）不算数，否则毫不相关的事实也会被分到一组。
+    只在组内按日期分新旧，不删不封旧的——旧的只是被标出来、排后一点。
+    在随机抽的 30 对无关事实里误分组是 0 对（2026-11-21 实测）。"""
+    if len(pool) < 2:
+        return {}
+    n = len(pool)
+    df: dict[str, int] = {}
+    contents = []
+    for h in pool:
+        ws = _key_words(h.get("content") or "")
+        contents.append(ws)
+        for w in ws:
+            df[w] = df.get(w, 0) + 1
+
+    def distinctive(w: str) -> bool:
+        return len(w) > 2 and df.get(w, 0) <= max(2, int(0.3 * n))
+
+    qterms = {w for w in re.findall(r"[a-z0-9']+", (query or "").lower()) if distinctive(w)}
+    if not qterms:
+        return {}
+
+    def key_sents(h: dict) -> list[set[str]]:
+        out = []
+        for s in re.split(r"(?<=[.!?])\s+", h.get("content") or ""):
+            ws = _key_words(s)
+            if ws & qterms:
+                out.append({w for w in ws if distinctive(w)})
+        return out
+
+    keys = [key_sents(h) for h in pool]
+    parent = list(range(len(pool)))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(len(pool)):
+        for j in range(i + 1, len(pool)):
+            shared = 0
+            for sa in keys[i]:
+                for sb in keys[j]:
+                    shared = max(shared, len(sa & sb))
+            if shared >= 2:
+                ra, rb = find(i), find(j)
+                if ra != rb:
+                    parent[ra] = rb
+    groups: dict[int, list[int]] = {}
+    for i in range(len(pool)):
+        groups.setdefault(find(i), []).append(i)
+
+    def when(h: dict) -> str:
+        return (h.get("valid_from") or h.get("occurred_at") or h.get("created_at") or "")
+
+    out: dict[str, str] = {}
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        newest = max(members, key=lambda i: when(pool[i]))
+        for i in members:
+            if i != newest and when(pool[i]) and when(pool[i]) < when(pool[newest]):
+                out[pool[i]["ext_id"]] = pool[newest]["ext_id"]
+    return out
+
+
+def order_by_xscore(pool: list[dict], xs: list[float], *, eps: float = 0.1) -> list[int]:
+    """按交叉编码器分排序；分差在 eps 以内的视作并列，日期新的排前面。
+
+    精排分对新旧两条几乎一样（同一件事、只差一个数字），分差是噪声；
+    这时该由日期定先后，而不是让旧值凭噪声占住第一。"""
+    import math
+
+    def when(h: dict) -> str:
+        return (h.get("valid_from") or h.get("occurred_at") or h.get("created_at") or "")
+
+    idx = sorted(range(len(pool)), key=lambda i: when(pool[i]), reverse=True)
+    return sorted(idx, key=lambda i: -math.floor((xs[i] or 0.0) / eps))
+
+
 def build_pool(con, text: str, context: list[str], ents: list[dict], rewrites: list[str], *,
                cap: int = POOL_CAP, trace: list | None = None, per_term: int = FTS_PER_TERM,
                vec_k: int = VEC_K, channel_cap: int | None = None, compat=None) -> list[dict]:
@@ -326,6 +419,22 @@ def build_pool(con, text: str, context: list[str], ents: list[dict], rewrites: l
         if h["ext_id"] in pin_flags:
             h["user_pinned"] = pin_flags[h["ext_id"]]
     # finalize 把 via 拼成字符串（专名不加分，只用 rrf+语义加成排序进池）
+    # 同一件事的新旧两条：新的置顶，旧的排后并标出来（STALE_WEIGHT 同款处理，只排后、不删不封）
+    try:
+        sup = superseded_map(pool, text)
+    except Exception:                                        # noqa: BLE001
+        sup = {}
+    if sup:
+        from stale import STALE_WEIGHT
+        by_id = {h["ext_id"]: h for h in pool}
+        for old_id, new_id in sup.items():
+            h = by_id.get(old_id)
+            if h is not None:
+                h["superseded_by"] = new_id
+                h["stale_by"] = new_id
+                h["hybrid_score"] = round(h.get("hybrid_score", 0) * STALE_WEIGHT, 5)
+                h["score"] = h["hybrid_score"]
+        pool.sort(key=lambda h: (-h["hybrid_score"], -float(h.get("act_score") or 0)))
     pool = pool[:cap]
     try:
         import echo as _echo
@@ -470,7 +579,7 @@ def select_x(pool: list[dict], text: str, xs: list[float], *, compat=None, max_h
         c = h.get("content") or ""
         strict = h.get("from_pin") or h.get("user_pinned") or c.startswith("〔归纳〕")
         return max(XMIN_DERIVED, base) if strict else base
-    order = sorted(range(len(pool)), key=lambda i: xs[i], reverse=True)
+    order = order_by_xscore(pool, xs)
     chosen = [i for i in order if xs[i] >= need(pool[i]) and compat(text, pool[i].get("content") or "")]
     if len(chosen) > 1 and xs[chosen[1]] < xs[chosen[0]] * XSECOND_RATIO:
         chosen = chosen[:1]

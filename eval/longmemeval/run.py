@@ -108,12 +108,18 @@ def lumen_hits(item: dict, mode: str, k: int, *, vectors: bool, rewrite: bool, x
                 s = xscore(q, [(h.get("content") or "") for h in pool]) if pool else []
                 if s is None:
                     raise RuntimeError("交叉编码器不可用：配置 XRERANK_URL / XRERANK_API_KEY，或 --xrerank local，或 --mock")
-                order = sorted(range(len(pool)), key=lambda i: -s[i])
+                order = RF.order_by_xscore(pool, s)
                 pool = [dict(pool[i], xscore=round(s[i], 4)) for i in order]
                 meta["top_xscores"] = [h["xscore"] for h in pool[:k]]
             hits = pool[:k]
         con.close()
-        return [(_date(h), h.get("content") or "") for h in hits], meta
+        out = []
+        for h in hits:
+            c = h.get("content") or ""
+            if h.get("superseded_by"):
+                c = "【较早版本，可能已被更新】" + c
+            out.append((_date(h), c))
+        return out, meta
     finally:
         for suf in ("", "-wal", "-shm"):
             try:
@@ -151,7 +157,8 @@ def make_xscore(kind: str):
         model = CrossEncoder(os.environ.get("XRERANK_MODEL") or "BAAI/bge-reranker-v2-m3", max_length=512)
 
         def local(q, docs):
-            raw = model.predict([(q, d[:300]) for d in docs])
+            import xrerank as _xr
+            raw = model.predict([(q, _xr.best_window(d, q)) for d in docs])
             return [1 / (1 + math.exp(-float(x))) if not 0 <= float(x) <= 1 else float(x) for x in raw]
         return local
     import xrerank

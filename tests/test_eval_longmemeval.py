@@ -52,6 +52,43 @@ class CredsTests(unittest.TestCase):
                 self.assertIsNone(V._creds())
 
 
+class RecencyTests(unittest.TestCase):
+    """新旧顶替三件套：精排窗口、分组标旧、并列时新的排前面。"""
+
+    OLD_FITBIT = ("Cool, thanks for the suggestions! I'll definitely check them out. By the way, "
+                  "I've been using my Fitbit Charge 3 for 6 months now, and it's been helping me stay on track.")
+    NEW_FITBIT = ("I've already been working on establishing a consistent bedtime routine and creating a "
+                  "sleep-conducive environment, but I think I need to focus on limiting stimulating activities "
+                  "before bed. I've been watching TV shows before bed, and I think that might be affecting my "
+                  "sleep. By the way, speaking of tracking my health, I just realized I've been using my "
+                  "Fitbit Charge 3 for 9 months now - it's crazy how time flies!")
+
+    def test_best_window_finds_buried_mention(self):
+        import xrerank as X
+        self.assertIn("9 months", X.best_window(self.NEW_FITBIT, "How long have I been using my Fitbit Charge 3?"))
+        self.assertNotIn("9 months", self.NEW_FITBIT[:300])  # 旧做法截前 300 字会把新值截掉
+        self.assertEqual(X.best_window("short doc", "q"), "short doc")
+
+    def test_superseded_map_groups_old_new(self):
+        import recall_flow as RF
+        pool = [
+            {"ext_id": "old", "content": self.OLD_FITBIT, "valid_from": "2023-06-18"},
+            {"ext_id": "new", "content": self.NEW_FITBIT, "valid_from": "2023-09-02"},
+            {"ext_id": "junk", "content": "I'm creating a role-playing game with some friends.", "valid_from": "2023-06-19"},
+        ]
+        self.assertEqual(RF.superseded_map(pool, "How long have I been using my Fitbit Charge 3?"),
+                         {"old": "new"})
+
+    def test_order_by_xscore_newer_wins_near_tie(self):
+        import recall_flow as RF
+        pool = [
+            {"ext_id": "old", "content": "old", "valid_from": "2023-06-18"},
+            {"ext_id": "new", "content": "new", "valid_from": "2023-09-02"},
+        ]
+        self.assertEqual(RF.order_by_xscore(pool, [0.9913, 0.9901]), [1, 0])  # 并列时新的在前
+        self.assertEqual(RF.order_by_xscore(pool, [0.99, 0.50]), [0, 1])     # 分差大时分说了算
+
+
 class StripThinkingTests(unittest.TestCase):
     def setUp(self):
         sys.path.insert(0, str(REPO / "eval/longmemeval"))

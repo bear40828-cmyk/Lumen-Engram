@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.request
 
@@ -23,6 +24,40 @@ import llm
 MODEL = "BAAI/bge-reranker-v2-m3"
 TIMEOUT_S = 3.0
 PER_CANDIDATE = 300
+
+
+def best_window(doc: str, query: str, limit: int = PER_CANDIDATE) -> str:
+    """给交叉编码器的片段：取含查询词最密的 limit 字窗口，而不是前 limit 字。
+
+    事实常是一大段话，关键的新值（如 "for 9 months"）可能埋在 300 字以后；
+    直接截前 300 字会把新值截掉，精排就永远看不到它。先按句切分，取查询词
+    命中最多的那句，再前后补足到 limit 字；没有命中时回退到前 limit 字。"""
+    if len(doc) <= limit:
+        return doc
+    terms = {w for w in re.findall(r"[A-Za-z0-9']+", query.lower()) if len(w) > 2}
+    sents = [s for s in re.split(r"(?<=[.!?])\s+", doc) if s.strip()]
+    if not sents:
+        return doc[:limit]
+
+    def hits(s: str) -> int:
+        low = s.lower()
+        return sum(low.count(t) for t in terms)
+    scored = [(hits(s), i) for i, s in enumerate(sents)]
+    best_hits, best_i = max(scored)
+    if best_hits == 0:
+        return doc[:limit]
+    out, n = sents[best_i], len(sents[best_i])
+    j = best_i + 1
+    while j < len(sents) and n + 1 + len(sents[j]) <= limit:
+        out += " " + sents[j]
+        n += 1 + len(sents[j])
+        j += 1
+    j = best_i - 1
+    while j >= 0 and n + 1 + len(sents[j]) <= limit:
+        out = sents[j] + " " + out
+        n += 1 + len(sents[j])
+        j -= 1
+    return out
 
 
 def _endpoint(env: dict) -> tuple[str | None, str | None, str]:
@@ -46,7 +81,7 @@ def scores(query: str, docs: list[str], *, timeout: float = TIMEOUT_S) -> list[f
     if not (key and url):
         return None
     body = json.dumps({"model": model, "query": query[-1000:],
-                       "documents": [d[:PER_CANDIDATE] for d in docs],
+                       "documents": [best_window(d, query) for d in docs],
                        "return_documents": False}).encode()
     req = urllib.request.Request(url, data=body, headers={
         "Authorization": f"Bearer {key}", "Content-Type": "application/json"})
