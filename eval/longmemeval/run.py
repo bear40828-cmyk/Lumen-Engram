@@ -73,11 +73,12 @@ def build_db(item: dict, db: str, vectors: bool):
                 promote(con, subject=user, fact_type=ft, content=turn["content"], evidence_ids=[ev],
                         valid_from=occ, confidence=conf)
     con.commit()
+    n_vec = 0
     if vectors:
         import vectors as V
-        V.build(con)
+        n_vec = V.build(con)
         con.commit()
-    return con
+    return con, n_vec
 
 
 def _date(h: dict) -> str:
@@ -88,19 +89,21 @@ def lumen_hits(item: dict, mode: str, k: int, *, vectors: bool, rewrite: bool, x
     fd, db = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     try:
-        con = build_db(item, db, vectors)
+        con, n_vec = build_db(item, db, vectors)
+        meta = {"n_vectors": n_vec} if vectors else {}
         q = item["question"]
         if mode == "legacy":
             import persona
             import retrieve as R
             r = R.retrieve(con, q, who=persona.USER)
             hits = r.hits[:k]
-            meta = {"should_recall": r.should_recall, "depth": r.depth, "terms": list(r.terms), "n_pool": len(r.hits)}
+            meta.update({"should_recall": r.should_recall, "depth": r.depth, "terms": list(r.terms),
+                         "n_pool": len(r.hits)})
         else:
             import recall_flow as RF
             pool = RF.topk(con, q, k=RF.FULL_POOL_CAP if mode == "1" else k, rewrite=rewrite,
                            autobuild_entities=True)
-            meta = {"n_pool": len(pool)}
+            meta["n_pool"] = len(pool)
             if mode == "1":
                 s = xscore(q, [(h.get("content") or "") for h in pool]) if pool else []
                 if s is None:
@@ -177,14 +180,36 @@ def chat(prompt: str) -> str:
     return f"[llm error: {err}]"
 
 
+def strip_thinking(text: str) -> str:
+    """去掉推理模型输出里的思考标记，只留最终答案。
+
+    DeepSeek-V4-Flash 这类推理模型常在答案前输出思考过程，判分前必须去掉，
+    否则判分模型会被思考里的旧值、新值混淆：
+      · 成对的 <think>...</think> 整段删（可多段）；
+      · 只有孤立的 </think> 时，删掉它之前的内容（那是没打 <think> 的思考）；
+      · 只有孤立的 <think> 时，删掉它及之后的内容（没闭合的思考，没有最终答案）。
+    没有标记时原样返回（只去首尾空白）。"""
+    if not text:
+        return text
+    out = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    low = out.lower()
+    if "</think>" in low:
+        idx = low.rindex("</think>")
+        out = out[idx + len("</think>"):]
+        low = out.lower()
+    if "<think>" in low:
+        out = out[:low.index("<think>")]
+    return out.strip()
+
+
 def answer(item: dict, hits: list, mock: bool) -> str:
     if mock:
-        return hits[-1][1][:200] if hits else "I don't know."
+        return strip_thinking(hits[-1][1][:200]) if hits else "I don't know."
     ctx = "\n\n".join(f"[{d}] {c[:1500]}" for d, c in sorted(hits)) or "(nothing retrieved)"
-    return chat("You are answering a question about the user's own past, using only these retrieved memory snippets "
+    return strip_thinking(chat("You are answering a question about the user's own past, using only these retrieved memory snippets "
                 "(the user's past messages, with dates). If facts changed over time, use the most recent. "
                 f"Today is {item['question_date']}.\n\nSnippets:\n{ctx}\n\nQuestion: {item['question']}\n"
-                "Answer concisely. If the snippets don't contain it, say you don't know.")
+                "Answer concisely. If the snippets don't contain it, say you don't know."))
 
 
 def judge(item: dict, pred: str, mock: bool) -> bool:
@@ -227,8 +252,12 @@ def main() -> int:
     arms = [x for x in (a.arms or (a.mode if a.mode == "bm25" else f"{a.mode},bm25")).split(",") if x]
     items = load_items(a.data, [t for t in a.types.split(",") if t], a.n, a.seed)
     xscore = make_xscore("mock" if a.mock else a.xrerank) if "1" in arms else None
+    vector_model = None
+    if a.vectors:
+        import vectors as _V
+        vector_model = _V.MODEL
     meta = {"data": os.path.basename(a.data), "types": a.types or "all", "n": len(items), "seed": a.seed, "k": a.k,
-            "arms": arms, "vectors": a.vectors, "rewrite": a.rewrite,
+            "arms": arms, "vectors": a.vectors, "vector_model": vector_model, "rewrite": a.rewrite,
             "xrerank": ("mock" if a.mock else a.xrerank) if "1" in arms else None,
             "xrerank_model": os.environ.get("XRERANK_MODEL") or "BAAI/bge-reranker-v2-m3",
             "answer_judge_model": "mock" if a.mock else (os.environ.get("EVAL_MODEL") or os.environ.get("DIGEST_MODEL")),
@@ -245,7 +274,7 @@ def main() -> int:
                 hits, m = lumen_hits(it, arm, a.k, vectors=a.vectors, rewrite=a.rewrite, xscore=xscore)
             pred = answer(it, hits, a.mock)
             row[arm] = {"pred": pred, "ok": judge(it, pred, a.mock), "n_hits": len(hits), "meta": m,
-                        "secs": round(time.time() - t0, 1)}
+                        "secs": round(time.time() - t0, 1), "hits": hits}
         rows.append(row)
         print(i, it.get("question_type"), " ".join(f"{arm}={row[arm]['ok']}" for arm in arms), "|", it["question"][:60],
               flush=True)

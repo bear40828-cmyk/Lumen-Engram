@@ -29,6 +29,38 @@ DATA = [
 ]
 
 
+class StripThinkingTests(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, str(REPO / "eval/longmemeval"))
+        import run as R
+        self.R = R
+
+    def test_paired_think_block_removed(self):
+        self.assertEqual(self.R.strip_thinking("<think>let me think...</think>six"), "six")
+        self.assertEqual(self.R.strip_thinking("intro <think>hmm</think> middle <think>hmm2</think> tail"),
+                         "intro  middle  tail")
+
+    def test_lone_close_think_drops_preceding(self):
+        # 只有孤立的 </think>：前面是没打 <think> 的思考，整段去掉
+        self.assertEqual(self.R.strip_thinking("some reasoning here</think>the shoes are in the closet"),
+                         "the shoes are in the closet")
+
+    def test_lone_open_think_drops_following(self):
+        self.assertEqual(self.R.strip_thinking("beagle<think>unclosed thinking"), "beagle")
+
+    def test_no_markers_unchanged(self):
+        self.assertEqual(self.R.strip_thinking("  six  "), "six")
+        self.assertEqual(self.R.strip_thinking(""), "")
+        self.assertEqual(self.R.strip_thinking("I don't know."), "I don't know.")
+
+    def test_answer_strips_think_before_judging(self):
+        # 答题模型输出混着思考标记时，answer() 返回的 pred 必须是干净的最终答案
+        self.R.chat = lambda prompt: "<think>old value was 100, new value is 250</think>250"
+        got = self.R.answer(DATA[0], [("2023-05-10", "six pottery classes")], mock=False)
+        self.assertEqual(got, "250")
+        self.assertNotIn("<think>", got)
+
+
 class EvalSmokeTests(unittest.TestCase):
     def test_all_arms_mock(self):
         with tempfile.TemporaryDirectory() as d:
@@ -43,9 +75,12 @@ class EvalSmokeTests(unittest.TestCase):
             self.assertEqual(res["meta"]["answer_judge_model"], "mock")
             self.assertTrue(res["meta"]["git_commit"])
             self.assertEqual(sorted(res["meta"]["question_ids"]), ["q1", "q2"])
+            self.assertIn("vector_model", res["meta"])
+            self.assertIsNone(res["meta"]["vector_model"])  # 没开 --vectors 时记 None
             for arm in ("legacy", "hybrid", "1", "bm25"):
                 self.assertEqual(res["summary"][arm]["total"], 2)
                 self.assertTrue(all(r[arm]["n_hits"] >= 1 for r in res["results"]), arm)
+                self.assertTrue(all(len(r[arm]["hits"]) == r[arm]["n_hits"] for r in res["results"]), arm)
 
     def test_type_filter_and_seed_are_deterministic(self):
         sys.path.insert(0, str(REPO / "eval/longmemeval"))

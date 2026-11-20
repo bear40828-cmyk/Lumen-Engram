@@ -43,10 +43,12 @@ wget -P data https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/reso
 | 答题与判分（OpenAI 兼容接口） | `EVAL_BASE_URL`、`EVAL_API_KEY`、`EVAL_MODEL`（未设时退回 `DIGEST_BASE_URL` / `DIGEST_API_KEY` / `DIGEST_MODEL`） |
 | 交叉编码器，`--xrerank api`（默认） | `XRERANK_URL`（Cohere/Jina 格式的 `/v1/rerank`）、`XRERANK_API_KEY`、`XRERANK_MODEL`（缺省 `BAAI/bge-reranker-v2-m3`）；未设 URL 时用 `DIGEST_BASE_URL` 同域名的 `/rerank` |
 | 交叉编码器，`--xrerank local` | 无需 key；`pip install sentence-transformers`，首次运行从 Hugging Face 下载 `BAAI/bge-reranker-v2-m3` |
-| 向量（`--vectors`，可选） | `CF_API_TOKEN`、`CF_ACCOUNT_ID`（Cloudflare Workers AI，bge-m3）；不开则只用关键词 |
+| 向量（`--vectors`，可选） | `CF_API_TOKEN`、`CF_ACCOUNT_ID`（Cloudflare Workers AI，模型见 `vectors.py` 的 `MODEL`，目前是 `@cf/baai/bge-m3`；也可写进仓库根目录的 `.env.jev`）；`--vectors` 时 meta 里记 `vector_model`，每道题的 Lumen 组 meta 里记实际建成的向量条数 `n_vectors`（0 条说明凭证没配或嵌入失败） |
 | 查询改写（`--rewrite`，可选） | 走仓库的 `llm.py`：`DIGEST_*` + `REWRITE_MODEL` |
 
 `--mock` 不调用任何模型和网络：答题取最后一条片段，判分做子串匹配，交叉编码器换成词重合打分。只用来检查流程能跑通，分数没有意义。
+
+答题模型的输出在判分前会过一遍 `strip_thinking`：去掉 `<think>...</think>` 整段思考，以及孤立的 `</think>` 之前的内容，只留最终答案再判分（推理模型常在思考里同时提到新值和旧值，不剥干净判分会被带偏）。
 
 ## 运行
 
@@ -81,9 +83,12 @@ export XRERANK_URL=https://api.example.com/v1/rerank XRERANK_API_KEY=...
            "answer_judge_model": "...", "git_commit": "<sha>[-dirty]", "started_at": "...", "question_ids": ["..."]},
   "summary": {"1": {"correct": 0, "total": 0, "by_type": {"knowledge-update": "0/0"}}, "bm25": {"...": "..."}},
   "results": [{"id": "...", "type": "...", "q": "...", "gold": "...",
-               "1": {"pred": "...", "ok": true, "n_hits": 10, "meta": {"n_pool": 40, "top_xscores": [0.9]}, "secs": 4.2},
+               "1": {"pred": "...", "ok": true, "n_hits": 10, "meta": {"n_pool": 40, "top_xscores": [0.9]}, "secs": 4.2,
+                     "hits": [["2023-05-10", "片段内容"], "..."]},
                "bm25": {"pred": "...", "ok": false, "n_hits": 10, "meta": {"query": "..."}, "secs": 3.1}}]
 }
 ```
+
+每组结果里还存了 `hits`（该组交给答题模型的前 k 条片段，`[日期，内容]`），用来事后查某道题答错时正确的新值在第几条、旧值在第几条。`meta` 里 `vector_model` 记开向量时用的嵌入模型（没开记 `null`）。
 
 `git_commit` 带 `-dirty` 表示运行时工作区有未提交改动。复现时请保留 `meta` 原样一起报告。
