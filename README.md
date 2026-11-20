@@ -34,7 +34,7 @@ Lumen Engram 的设计目标，就是让这三件事在结构上难以发生，�
 - **明确不查。** 「嗯」「好的」「早」这类应答、系统或工具消息、定时任务发起的会话、没要求回忆的长篇粘贴，都直接跳过，不花检索和模型调用。
 - **查不到时。** 用户明确在问旧事（「还记得……」「上次……」）却没有可靠命中时，注入一句「已查，没有可靠记录」，提示模型直说想不起来或反问，不要编。
 - **纠正后。** 用户说「我不是在甲市读书，是在乙市」，这条纠正核对过原话后写成已确认并钉住。之后再聊到读书的事，召回优先给这条。
-- **换窗口后。** 开新窗口时注入上一窗口交接笔记里的摘要、悬着的事和用户状态，带「交接笔记，可能已过时」的标签；同一窗口不重复注入，超过 14 天的笔记不注入。
+- **换窗口后。** 开新窗口时注入上个窗口的摘要（话题、悬着的事、近况）和最后 10 轮原话，例如「[11/02 21:40] 用户：那周六上午出发？」「[11/02 21:41] 助手：好，我把门票订上」，新窗口能直接接着订票的事往下说。
 
 ## 一条记忆的生命周期
 
@@ -108,12 +108,20 @@ Lumen Engram 的设计目标，就是让这三件事在结构上难以发生，�
 
 ### 7. 跨窗接力
 
-效果：开新窗口时能接上上一窗口在做的事、还没办完的事和用户当时的状态。
+效果：开新窗口时直接接上上个窗口的话头，带着摘要、还没办完的事、用户近况和最后几轮原话。
 
-- `hooks_handoff_inject.py` 挂在 `SessionStart`（`HANDOFF_INJECT`），读交接目录的只读镜像，取最新一份交接笔记。交接笔记由外部流程生成，本仓库只负责读取和注入。
-- 只注入三段：摘要、悬着的事、用户状态，不带原话，带「交接笔记，可能已过时」标签。
-- 最后消息超过 14 天不注入（`ENGRAM_HANDOFF_MAX_AGE_DAYS`）；同一窗口不注入自己；压缩续接、定时任务会话不注入。
-- 总长上限 1200 字（`ENGRAM_HANDOFF_MAX_CHARS`）；超长时先从后往前砍摘要，再砍状态，最后才砍悬着的事。注入前过打码。
+`handoff_build.py` 挂在 `SessionStart`，现生成交接笔记并注入，同时落盘到 `handoff/handoff.txt`：
+
+- **选上个窗口**：会话目录（`ENGRAM_TRANSCRIPT_DIR`）里修改时间仅次于当前会话的 jsonl。紧挨着的若是短窗口（不足 30 轮且没有 /compact 摘要），继续往前找有内容的窗口，最多看 8 个；找到的窗口比短窗口早 24 小时以上则退回短窗口。
+- **摘要**：该窗口自带 /compact 摘要就直接复用；没有时由模型（用途 `handoff`）基于最后 240 轮补写，超长按 3 万字分段先摘再合并。分「话题 / 悬着的事 / 近况 / 一句话概要」四段，条数硬上限 10 / 5 / 5 / 1；按会话和最后消息时间缓存。不足 12 轮不补写，没配模型时只带原话。
+- **最后 N 轮原话**：默认 10 轮，一字不改；系统消息、工具结果、内部任务头、空回复不算轮次，重复落盘的同一句去重。
+- **外部消息流（可选适配器）**：配 `ENGRAM_HANDOFF_SIDE_FILE`（每行 `{"ts","from","text"}` 的 jsonl，例如聊天 App 的落盘记录）后，在上个窗口没有 /compact 摘要或跳过了短窗口时，取其末尾最多 30 条（单条截 800 字，截到上个窗口最后一条 +10 秒），去掉与最后 N 轮重复的（同说话人、15 秒内、正文包含），按时间分成「早于原话 / 与原话同时段 / 晚于原话」三段插入。
+- **顺序**：摘要 → 外部消息较早部分 → 最后 N 轮原话（同时段的外部消息按时间插入）→ 外部消息较晚部分，整段从上到下按时间往后。
+- **跳过**：压缩续接（`source=compact`）、后台任务会话（`CC_SESSION_KEY` 含 `#cron:`）、守夜调用（`CLAUDE_WAKE_GATE`）、输出目录里有 `PAUSE` 文件。
+- 模型补写的摘要可用 `ENGRAM_HANDOFF_SCRUB_REGEX` 把命中分句替换成概括语；整段注入前过密钥打码。
+- 未收录：按会话名识别特定调度器的后台会话、按时间段手工排除某几轮，这两项依赖具体部署，需要时自行在外层处理。
+
+另有精简版 `hooks_handoff_inject.py`（`HANDOFF_INJECT`）：只读已生成的交接笔记，只注入摘要、悬着的事、用户状态三段，不带原话；超过 14 天不注入、同一窗口不注入自己；总长上限 1200 字，超长时先砍摘要、再砍状态、最后才砍悬着的事。适合不想把原话带进新窗口的部署。
 
 ### 8. 夜间养护
 
@@ -210,7 +218,7 @@ claude mcp add engram -- python3 /path/to/Lumen-Engram/mcp_server.py
 **钩子**（写入 `~/.claude/settings.json`）：
 
 - `UserPromptSubmit` → `hooks_engram_recall.py`：每轮对话前自动判断并注入相关记忆。
-- `SessionStart` → `hooks_handoff_inject.py`：开新窗口时注入上一窗口的交接摘要（需开 `ENGRAM_HANDOFF_INJECT`）。
+- `SessionStart` → `handoff_build.py`：开新窗口时生成并注入交接笔记（摘要 + 最后 N 轮原话 + 可选外部消息流），需配 `ENGRAM_TRANSCRIPT_DIR`。只想注入摘要三段时改用 `hooks_handoff_inject.py`（需开 `ENGRAM_HANDOFF_INJECT`）。
 
 钩子任何异常都静默退出，不会打断对话。
 
@@ -225,6 +233,7 @@ claude mcp add engram -- python3 /path/to/Lumen-Engram/mcp_server.py
 | 查询改写（`RECALL_REWRITE`） | `REWRITE_MODEL`（没配退回 `RERANK_FLASH_MODEL` / `RERANK_MODEL`） | `hybrid` 路径无直通专名时 | 便宜档 |
 | 切片蒸馏 | `EXTRACT_MODEL` | 会话安静后，约每 30 分钟 | 强档 |
 | 新事顶旧事初判 | `EXTRACT_MODEL` | 蒸馏出新事实时 | 强档 |
+| 交接摘要补写 | `HANDOFF_MODEL`（没配退回 `DIGEST_MODEL`） | 开新窗口且上个窗口没有 /compact 摘要时，有缓存 | 便宜档即可 |
 | 新事顶旧事复核 | `TIMELINE_CONFIRM_MODEL` | 初判认为要顶替时 | 强档 |
 | 夜间聚类归纳 | `CLUSTER_MODEL` | 每天一次，有调用上限 | 强档 |
 | 向量嵌入 | `CF_API_TOKEN` / `CF_ACCOUNT_ID` | 新事实入库后补齐 | Cloudflare 免费额度通常够用 |
@@ -272,7 +281,7 @@ ENGRAM_RECALL_V2=1
 | `METAMEM` | 召回时检查证据冲突 |
 | `CONTEXT_ROUTE` | 按对话场合调整召回策略 |
 | `SELF_REMEMBER` | 开放助手自记工具 |
-| `HANDOFF_INJECT` | 开窗注入交接摘要 |
+| `HANDOFF_INJECT` | 精简版开窗注入（`hooks_handoff_inject.py`）；`handoff_build.py` 不受此开关控制，挂上钩子即生效 |
 | `CLUSTER_SUMMARY` | 夜间聚类归纳 |
 | `RECALL_V2` | 召回新路径：不设＝旧路径；`hybrid`＝有直通专名时走新路径（大模型精排）；`1`＝每轮走新路径（交叉编码器精排） |
 | `RECALL_REWRITE` | 新路径的查询改写（2～3 个检索问句），仅 `RECALL_V2=hybrid` 时生效 |
@@ -288,8 +297,12 @@ ENGRAM_RECALL_V2=1
 | `ENGRAM_XRERANK_MIN` | 0.45 | 交叉编码器最低分 |
 | `ENGRAM_XRERANK_MIN_EXPLICIT` | 0.25 | 明确回忆句的最低分 |
 | `ENGRAM_XRERANK_MIN_DERIVED` | 0.8 | 归纳条、钉住条的最低分 |
-| `ENGRAM_HANDOFF_MAX_CHARS` | 1200 | 交接注入总长上限 |
-| `ENGRAM_HANDOFF_MAX_AGE_DAYS` | 14 | 交接笔记过期天数 |
+| `ENGRAM_HANDOFF_TURNS` | 10 | 交接带最后几轮原话（`handoff_build.py`） |
+| `ENGRAM_HANDOFF_SUMMARY_TURNS` | 240 | 补写摘要读最后几轮 |
+| `ENGRAM_HANDOFF_SHORT_TURNS` / `_LOOKBACK_HOURS` | 30 / 24 | 短窗口门槛、往前找的时间窗 |
+| `ENGRAM_HANDOFF_SIDE_FILE` / `_SIDE_USER` / `_SIDE_LIMIT` | 空 / me / 30 | 外部消息流适配器 |
+| `ENGRAM_HANDOFF_MAX_CHARS` | 1200 | 精简注入总长上限（`hooks_handoff_inject.py`） |
+| `ENGRAM_HANDOFF_MAX_AGE_DAYS` | 14 | 精简注入的过期天数 |
 | `ENGRAM_REMEMBER_PER_SESSION` / `_PER_DAY` | 3 / 5 | 助手自记限额 |
 
 ## 定时维护
@@ -311,7 +324,7 @@ ENGRAM_RECALL_V2=1
 python3 -m unittest discover -s tests -t .
 ```
 
-655 个测试：650 通过，5 个按设计跳过（见「已知边界」），全部使用临时库与虚构人设，不依赖真实数据或模型接口。
+662 个测试：657 通过，5 个按设计跳过（见「已知边界」），全部使用临时库与虚构人设，不依赖真实数据或模型接口。
 覆盖值得记闸、入库与蒸馏、防回声与说话人、召回与精排、新事顶旧事、密钥打码、夜间归纳、Obsidian 导出与回收站、模型路由与开关，以及历次审查固定下来的回归用例。
 
 ## 评测

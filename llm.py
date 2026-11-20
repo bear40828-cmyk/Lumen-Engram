@@ -50,6 +50,8 @@ PURPOSE_MODEL_VARS = {
     "rewrite": ("REWRITE_MODEL", "RERANK_FLASH_MODEL", "RERANK_MODEL"),
     # 2026-10-29: second-opinion pass of extract/timeline.py (ENGRAM_TIMELINE_CONFIRM=1); unset -> EXTRACT_MODEL / DIGEST_MODEL
     "timeline_confirm": ("TIMELINE_CONFIRM_MODEL", "EXTRACT_MODEL"),
+    # 跨窗接力：给没有 /compact 摘要的上个窗口补写交接摘要（handoff_build.py）；没配 HANDOFF_MODEL 退回 DIGEST_MODEL
+    "handoff": ("HANDOFF_MODEL",),
 }
 USAGE_DB = None          # 测试可以指到临时库；默认 ENGRAM_DB 或 ROOT/engram.db
 USAGE_FORCE = False      # 测试里要真写时设 True（默认在 unittest 下不写，免得测试往正式库记账）
