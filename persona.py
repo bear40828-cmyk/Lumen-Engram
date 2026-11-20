@@ -243,7 +243,8 @@ def glossary_block() -> str:
     if not p:
         return ""
     try:
-        body = Path(p).read_text(encoding="utf-8").rstrip("\n")
+        body = "\n".join(l for l in Path(p).read_text(encoding="utf-8").splitlines()
+                         if not l.lstrip().startswith("#!")).rstrip("\n")     # 「#!」行只给实体归属闸用（entity_gate），不进提示词
     except OSError:
         return ""
     return ("几个固定的人（原话里常这么叫）：\n" + body + "\n") if body.strip() else ""

@@ -191,7 +191,7 @@ def keywords(text: str, k: int = 3) -> list[str]:
         if len(w) < 2 or w in seen:
             continue
         seen.add(w)
-        out.append(w[:8])
+        out.append(w if w.isascii() else w[:8])   # 英文词不截断（截成 processe 这类串库里搜不到）
         if len(out) >= k:
             break
     return out

@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from echo import ECHO_WEIGHT, echo_sources  # noqa: E402
-from salience import COLD_WEIGHT  # noqa: E402
+from salience import COLD_WEIGHT, decay  # noqa: E402
 from stale import STALE_WEIGHT  # noqa: E402
 from store.store import search    # noqa: E402
 
@@ -92,18 +92,34 @@ def _disowned(con, ext_ids: list[str]) -> set[str]:
         return set()
 
 
-def rrf_merge(lists: dict[str, list[dict]]) -> dict[str, dict]:
-    """多路排好序的候选 → {ext_id: hit（带 rrf、via）}。"""
+def rrf_merge(lists: dict[str, list[dict]], weights: dict[str, float] | None = None) -> dict[str, dict]:
+    """多路排好序的候选 → {ext_id: hit（带 rrf、via）}。weights：某一路的权重（默认 1；召回改造里专名那一路用）。"""
     merged: dict[str, dict] = {}
     for via, hits in lists.items():
+        w = (weights or {}).get(via, 1.0)
         for rank, h in enumerate(hits, 1):
             m = merged.setdefault(h["ext_id"], dict(h) | {"rrf": 0.0, "via": []})
-            m["rrf"] += 1.0 / (RRF_K + rank)
+            m["rrf"] += w / (RRF_K + rank)
             m["via"].append(via)
             # 优先保留带激活度分数的那份记录（FTS 路的 score 是激活度，向量路的是余弦）
             if via != "vector" and "act_score" not in m:
                 m["act_score"] = float(h.get("score") or 0)
     return merged
+
+
+def _age_days(h: dict) -> float | None:
+    """事实发生到现在多少天；没有时间返回 None（不参与衰减）。"""
+    from datetime import datetime, timezone
+    ts = h.get("valid_from") or h.get("created_at")
+    if not ts:
+        return None
+    try:
+        t = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - t).total_seconds() / 86400
 
 
 def finalize(merged: dict[str, dict], *, goal_rel: float = 0.0, goal_overlap=None,
@@ -129,6 +145,9 @@ def finalize(merged: dict[str, dict], *, goal_rel: float = 0.0, goal_overlap=Non
             s *= ECHO_WEIGHT                       # 只有转述：降权（confirmed/钉住已在 echo_sources 里豁免）
         if h.get("layer") == "cold":
             s *= COLD_WEIGHT
+        age = _age_days(h)
+        if age is not None and not h.get("user_pinned") and h.get("status") != "confirmed":
+            s *= 0.4 + 0.6 * decay(age, h.get("fact_type"))   # 新近度进排序（钉住/confirmed、没时间的不衰减）
         newer = (stale or {}).get(h["ext_id"])
         h["stale_by"] = newer["ext_id"] if newer else None      # 「可能过时」软标记（stale.py，开关 INVALIDATE_CHAIN）
         h["stale_new"] = newer

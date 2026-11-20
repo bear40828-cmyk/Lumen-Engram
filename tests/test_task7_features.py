@@ -42,21 +42,21 @@ class MetamemKeys(Base):
         return [{"ext_id": self.ext(f)} for f in fids]
 
     def test_single_key_two_values_is_conflict(self):
-        a, b = self.fact("用户老家在甲市"), self.fact("用户老家在乙县")
-        self.keyed(a, "person.hometown", "甲市"); self.keyed(b, "person.hometown", "乙县")
+        a, b = self.fact("小测老家在乙县"), self.fact("小测老家在丁市")
+        self.keyed(a, "person.hometown", "乙县"); self.keyed(b, "person.hometown", "丁市")
         with mock.patch("keys.by_name", return_value=mock.Mock(cardinality="single")):
             ev = metamem.check_evidence(self.con, self.hits(a, b), lexical=False)
         self.assertTrue(any("person.hometown 有两个值" in c for c in ev.conflicts), ev.conflicts)
 
     def test_multi_key_two_values_is_not_conflict(self):
-        a, b = self.fact("用户考301"), self.fact("用户考302")
-        self.keyed(a, "education.exam_subject", "301"); self.keyed(b, "education.exam_subject", "302", "neg")
+        a, b = self.fact("小测考526"), self.fact("小测考713")
+        self.keyed(a, "education.exam_subject", "526"); self.keyed(b, "education.exam_subject", "713", "neg")
         with mock.patch("keys.by_name", return_value=mock.Mock(cardinality="multi")):
             ev = metamem.check_evidence(self.con, self.hits(a, b), lexical=False)
         self.assertEqual(ev.conflicts, ())
 
     def test_polarity_conflict_needs_same_value(self):
-        a, b = self.fact("爱吃苹果"), self.fact("用户说爱吃苹果其实不爱")
+        a, b = self.fact("爱吃苹果"), self.fact("小测说爱吃苹果其实不爱")
         self.keyed(a, "preference.food", "苹果"); self.keyed(b, "preference.food", "苹果", "neg")
         with mock.patch("keys.by_name", return_value=mock.Mock(cardinality="multi")):
             ev = metamem.check_evidence(self.con, self.hits(a, b), lexical=False)
@@ -75,11 +75,11 @@ class TimelineWiring(Base):
         super().setUp()
         if not self._has_class():
             self.skipTest("schema 里没有 fact_class")
-        self.old = self.fact("用户说chess游戏每天都在做", "2026-09-01")
+        self.old = self.fact("小测说sims4游戏每天都在做", "2026-09-01")
         from store.store import add_evidence
         ev = add_evidence(self.con, source_kind="chat", source_actor="tester", source_locator="conv:t#msg:77",
-                          content="我不做chess游戏了", occurred_at="2026-09-23")
-        self.new_ok = {"subject": "tester", "content": "用户说chess游戏已经不做了",
+                          content="我不做sims4游戏了", occurred_at="2026-09-23")
+        self.new_ok = {"subject": "tester", "content": "小测说sims4游戏已经不做了",
                        "occurred_at": "2026-09-23", "evidence_id": ev}
 
     def run_target(self, env, idx):
@@ -103,10 +103,10 @@ class TimelineWiring(Base):
         confirm(self.con, self.ext(self.old))
         env = {**OFF, "ENGRAM_TIMELINE": "1"}
         with mock.patch.dict(os.environ, env, clear=True):
-            self.assertEqual(timeline.candidates(self.con, "tester", "用户说chess游戏已经不做了", None), [])
+            self.assertEqual(timeline.candidates(self.con, "tester", "小测说sims4游戏已经不做了", None), [])
 
     def test_dup_new_fact_does_not_seal_old(self):
-        self.fact("用户说chess游戏已经不做了", "2026-09-22")
+        self.fact("小测说sims4游戏已经不做了", "2026-09-22")
         t = self.run_target({"ENGRAM_TIMELINE": "1", "ENGRAM_INVALIDATE_CHAIN": "1"}, 0)
         self.assertIsNone(t)
 

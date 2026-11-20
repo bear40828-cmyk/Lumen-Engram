@@ -34,7 +34,7 @@ class Selection(unittest.TestCase):
         self.assertIsNone(D.category("我：<channel source=x>" + LONG))              # K0
         self.assertIsNone(D.category("我：哈哈哈今天好开心呀你真的好可爱呀😂😂😂😂😂" + "呀" * 10))  # K6
         self.assertEqual(D.category("我：" + LONG), "K7")                            # 含「要不要/下一步」
-        self.assertEqual(D.category("我：" + "我把数据库的配置文件和部署脚本都改完了，服务器上的日志也清了一遍。" * 5), "K8")
+        self.assertEqual(D.category("我：" + "我把标本馆的配置文件和部署脚本都改完了，服务器上的日志也清了一遍。" * 5), "K8")
         self.assertEqual(D.category("我：" + "昨天我们一起看了很久的电影，后来她睡着了，我就把灯关了。" * 2), "K9")
 
     def test_pick_is_deterministic_and_stratified(self):

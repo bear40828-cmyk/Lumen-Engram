@@ -156,7 +156,7 @@ class FalsePositives(unittest.TestCase):
 
     def test_words_numbers(self):
         self.same("2026-10-28T02:14:43+00:00 的 llm_usage 里 prompt_tokens=6423")
-        self.same("她说今天喝了奶茶，还要去某大学办事情，手机号 13800138000 是假的")
+        self.same("她说今天喝了豆浆，还要去某大学办事情，手机号 13800138000 是假的")
         self.same("A" * 40)
         self.same("1234567890" * 4)
         self.same("token 数量不够，再试一次；密码太简单了")

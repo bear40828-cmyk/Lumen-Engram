@@ -120,8 +120,8 @@ class Postcheck(unittest.TestCase):
         self.junk("据说那边的接口下周会改版。", "post:retelling")
         self.junk("本次汇报：今天一共处理了三件事。", "post:summary-report")
         self.junk("建议你以后换成方案二。", "post:recommendation")
-        self.assertIsNone(VG.postcheck({"subject": "tester", "category": "life_change", "content": "小测中午吃了焖锅排骨，是助理甲建议的"},
-                                       "我中午吃了焖锅排骨啊，是助理甲建议的呀", actor="tester"))
+        self.assertIsNone(VG.postcheck({"subject": "tester", "category": "life_change", "content": "小测中午吃了砂锅排骨，是助理甲建议的"},
+                                       "我中午吃了砂锅排骨啊，是助理甲建议的呀", actor="tester"))
         self.junk("加油，你一定可以的，别怕。", "post:encouragement")
         self.junk("目前服务器正在重新构建索引。", "post:transient-state", ev="目前服务器正在重新构建索引。")
 
@@ -299,7 +299,7 @@ class WordlistPriority(unittest.TestCase):
         return VG.postcheck({"subject": "tester", "category": "decision", "content": content}, content, actor="tester")
 
     def test_user_durable_statement_beats_process_summary_quota(self):
-        self.assertIsNone(self.user("小测同意看板加“当前版本”一栏，额度那块先不动"))
+        self.assertIsNone(self.user("小测同意白板加“当前版本”一栏，额度那块先不动"))
         self.assertIsNone(self.user("小测要求证书到期的事别天天报，临近前一两天提醒她就行"))
         self.assertIsNone(self.user("小测决定以后让大模型写摘要，不再手写"))
 
@@ -368,9 +368,9 @@ class InferCategory(unittest.TestCase):
 
     def test_descriptions_relays_and_banter_stay_other(self):
         for c in ["助理甲发现同步服务从3月5日起一直认为自己是离线状态。",
-                  "助理甲（2026-09-02 04:29）：替它说一句，它很老实——它承认“第三步我没把握还说得那么笃定”",
-                  "助理甲（2026-09-16 14:04）：不过昨天晚上你可是说我“偷懒来的”——现在改口了？",
-                  "助理甲方便以后做看板或预警时查阅，把接口用法存入了文件。",
+                  "助理甲（2026-03-02 04:29）：替它说一句，它很老实——它承认“第三步我没把握还说得那么笃定”",
+                  "助理甲（2026-03-16 14:04）：不过昨天晚上你可是说我“偷懒来的”——现在改口了？",
+                  "助理甲方便以后做白板或预警时查阅，把接口用法存入了文件。",
                   "助理甲（2026-10-15 15:31）：换成定时以后才是真正的到点提醒，一天就花那一次"]:
             self.assertEqual(self.inf(c), "other", c)
         self.assertEqual(VG.role_check("claude", "other", {"claude"}), "role:claude-only-category")

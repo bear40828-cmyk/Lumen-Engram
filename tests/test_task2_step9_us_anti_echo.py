@@ -141,11 +141,11 @@ class NumberCheck(unittest.TestCase):
         self.assertEqual(FE.numbers_unsupported("在8月13日完成", "8 月 14 号 19:00"), ["13"])
 
     def test_supported_numbers_pass(self):
-        self.assertEqual(FE.numbers_unsupported("2026-06 底停机", "是 2026-06 底那次停机"), [])
+        self.assertEqual(FE.numbers_unsupported("2026-06 底停卡", "是 2026-06 底那次停卡"), [])
         self.assertEqual(FE.numbers_unsupported("8月6日下午7:24", "8/6 下午 07:24 掉到"), [])      # 前导零
         self.assertEqual(FE.numbers_unsupported("换线6次", "换线六次"), [])                          # 个位数↔中文数字
         self.assertEqual(FE.numbers_unsupported("没有数字的一句话", "任何原话"), [])
-        self.assertEqual(FE.numbers_unsupported("302 专业课", "我报 302"), [])
+        self.assertEqual(FE.numbers_unsupported("713 专业课", "我报 713"), [])
 
     def test_check_drops_invented_year(self):
         chunk = [{"id": 1, "source_actor": "tester", "content": "第一封（6/26）说的是政策问题",

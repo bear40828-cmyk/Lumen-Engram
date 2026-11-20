@@ -48,6 +48,11 @@
                              （+0.01，只动顺序、不过滤、不丢）。who 显式传了就以 who 为准。关＝跟现在一字不差。
     ATOMIC_SPLIT      关     （任务四·步骤5）maintenance/split_atomic.py：把旧的「一条里塞好几件事」的事实拆成原子事实（新派生事实，
                              原事实不改）。关＝脚本直接退出。**不要对正式库跑**，先在副本上看。
+    RECALL_V2         关     （=hybrid：句中有直通专名才走新路径，否则旧路径原样）（召回改造，2026-11-04）hook 走 recall_flow.py 四层：专名直通（entities.py 自动专名表）→ 每轮 FTS+向量 →
+                             池 ≤20 交精排 → ≤2 条注入；规则路由不再有否决权。关＝钩子走原来的路由，一字不差。
+                             开了每轮都会调一次精排模型（原来只有路由放行的那 1/3 会调）——开之前看成本估算。
+    RECALL_REWRITE    关     （召回改造·第 3 层；要 RECALL_V2 开才有意义）没有专名直通时，便宜模型把当前句改写成 2~3 个检索问句，
+                             再各查一遍。每轮再多一次便宜模型调用（模型取 REWRITE_MODEL，没配退回 RERANK_FLASH_MODEL / RERANK_MODEL）。
     （另：llm_usage 记账不是开关，默认开，只记 token、失败静默；设环境变量 ENGRAM_LLM_USAGE=0 关掉。）
 """
 from __future__ import annotations
@@ -72,8 +77,24 @@ DEFAULTS = {
     "CLUSTER_SUMMARY": False,
     "CONTEXT_ROUTE": False,
     "ATOMIC_SPLIT": False,
+    "RECALL_V2": False,
+    "RECALL_REWRITE": False,
 }
 _TRUE = {"1", "true", "on", "yes"}
+
+
+def raw(name: str) -> str | None:
+    """开关的原始字符串（如 RECALL_V2=hybrid）；没设返回 None。"""
+    if name not in DEFAULTS:
+        raise KeyError(f"未登记的开关：{name}")
+    v = os.environ.get(f"ENGRAM_{name}")
+    if v is None:
+        try:
+            from llm import load_env
+            v = load_env().get(f"ENGRAM_{name}")
+        except Exception:                                    # noqa: BLE001
+            v = None
+    return v.strip().lower() if isinstance(v, str) else None
 
 
 def on(name: str) -> bool:

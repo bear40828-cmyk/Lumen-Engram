@@ -7,7 +7,7 @@
 #      写 project.status，不写 project.lumen_engram.status
 #   3. 从第一天就带 cardinality 和 conflict_policy，因为这才是 fact_key 的真正价值：
 #      新事实来了，到底该覆盖旧的还是并存
-#   4. 某种 NULL 模式反复出现（比如连续几十条「考研专业」），audit 提 candidate_key，
+#   4. 某种 NULL 模式反复出现（比如连续几十条「考级专业」），audit 提 candidate_key，
 #      人工审过再正式加进来。不让模型自产 schema
 #
 # cardinality:      single = 同一 subject 只该有一个当前值 | multi = 可以并存
@@ -19,7 +19,7 @@
 education.target_school:
   owner: tester
   cardinality: single
-  requires_self: true      # 她自己说「我考某大学」才算；转述里的「小测考研目标院校是某大学」不算
+  requires_self: true      # 她自己说「我考某大学」才算；转述里的「小测考级目标院校是某大学」不算
   value_type: entity
   conflict_policy: supersede
   patterns:
@@ -31,7 +31,7 @@ education.target_school:
 education.target_major:
   owner: tester
   cardinality: single
-  requires_self: true      # 她自己说「我考某大学」才算；转述里的「小测考研目标院校是某大学」不算
+  requires_self: true      # 她自己说「我考某大学」才算；转述里的「小测考级目标院校是某大学」不算
   value_type: entity
   conflict_policy: supersede
   patterns:
@@ -45,17 +45,17 @@ education.exam_subject:
   cardinality: multi
   value_type: entity
   conflict_policy: coexist
-  digit_boundary: true     # 「301」不能从手机号里抠出来
+  digit_boundary: true     # 「526」不能从手机号里抠出来
   patterns:
-    - '302'
-    - '301'
-    - '(数据结构|数据库|操作系统|计算机网络|计网).{0,6}(\d+%|占)'
-  value_pattern: '(数据结构|数据库|操作系统|计算机网络|计网|302|301)'
+    - '713'
+    - '526'
+    - '(木工学|标本馆|陶艺课|园艺学|园艺).{0,6}(\d+%|占)'
+  value_pattern: '(木工学|标本馆|陶艺课|园艺学|园艺|713|526)'
 
 education.graduation:
   owner: tester
   cardinality: single
-  requires_self: true      # 她自己说「我考某大学」才算；转述里的「小测考研目标院校是某大学」不算
+  requires_self: true      # 她自己说「我考某大学」才算；转述里的「小测考级目标院校是某大学」不算
   value_type: date
   conflict_policy: supersede
   patterns:
@@ -66,7 +66,7 @@ education.graduation:
 person.hometown:
   owner: tester
   cardinality: single
-  requires_self: true      # 她自己说「我考某大学」才算；转述里的「小测考研目标院校是某大学」不算
+  requires_self: true      # 她自己说「我考某大学」才算；转述里的「小测考级目标院校是某大学」不算
   value_type: entity
   conflict_policy: supersede
   patterns:
@@ -104,8 +104,8 @@ preference.food:
   requires_self: true
   patterns:
     - '(爱吃|想吃|喜欢吃|不爱吃|吃不了)'
-    - '(米线|焖锅|汤面|奶茶|泡芙|冰红茶|可乐).{0,6}(好吃|喜欢|想)'
-  value_pattern: '(米线|焖锅鸡|焖锅排骨|汤面|奶茶|泡芙|冰红茶|可乐|牛肉粉)'
+    - '(面片|砂锅|汤面|豆浆|蛋挞|冰红茶|可乐).{0,6}(好吃|喜欢|想)'
+  value_pattern: '(面片|砂锅鸡|砂锅排骨|汤面|豆浆|蛋挞|冰红茶|可乐|牛肉粉)'
 
 comm.format_rule:
   owner: tester
@@ -127,6 +127,6 @@ project.status:
   # supersede 的 key 宁可少收也不能乱收，否则会拿无关的话去作废真事实。
   # 所以必须同时出现一个项目名词。
   patterns:
-    - '(engram|记忆库|看板|摘要层|唤醒|通道|服务|systemd|插件|脚本|项目|bridge|watchdog|心潮).{0,12}(上线|跑通|做完|冻结|停了|卸了|disable|部署好)'
-    - '(上线|跑通|做完|冻结|停了|卸了|部署好).{0,12}(engram|记忆库|看板|摘要层|唤醒|通道|服务|systemd|插件|脚本|项目)'
+    - '(engram|记忆库|白板|索引层|点名|通道|服务|systemd|插件|脚本|项目|bridge|watchdog|心潮).{0,12}(上线|跑通|做完|冻结|停了|卸了|disable|部署好)'
+    - '(上线|跑通|做完|冻结|停了|卸了|部署好).{0,12}(engram|记忆库|白板|索引层|点名|通道|服务|systemd|插件|脚本|项目)'
   value_pattern: '(上线|跑通|做完|冻结|停了|卸了|部署好)'

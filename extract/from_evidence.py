@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from store.store import (add_evidence, connect, promote, record_class, record_tier,  # noqa: E402
                          sha256)
 from llm import chat  # noqa: E402
+import entity_gate  # noqa: E402
 import echo  # noqa: E402
 from extract import timeline  # noqa: E402
 from extract.from_channel import WHO, beijing, harvest  # noqa: E402
@@ -39,8 +40,8 @@ ENV_FILE = persona.env_file()
 EXTRACTOR = "extract-llm-v1"
 SUBJECTS = {*persona.ACTORS, "us"}
 TYPES = {"episodic", "semantic", "preference", "procedural"}
-CHUNK_CHARS = 6000          # 一块喂给模型的原话总长
-PER_MSG = 600               # 单条原话最长截多少
+CHUNK_CHARS = int(os.environ.get("ENGRAM_CHUNK_CHARS", 6000))          # 一块喂给模型的原话总长
+PER_MSG = int(os.environ.get("ENGRAM_PER_MSG", 600))               # 单条原话最长截多少
 TIMEOUT_S = 90
 MIN_QUOTE = 4
 
@@ -386,10 +387,18 @@ def check(fact: dict, chunk: list[dict]) -> tuple[dict | None, str]:
     bad = numbers_unsupported(content, *srcs)
     if bad:
         return None, f"number-unsupported：{'/'.join(bad[:3])} 在原话里找不到"
+    # 实体归属闸（2026-11-03，和数字校验同级、没有开关；没配词表时不起作用）：AI 名 / 外号 / 括号注解要出自原话
+    ev = entity_gate.judge(content, srcs, "\n".join(e["content"] for e in chunk), subj,
+                           actors={actor} | ({hit2.get("source_actor")} if hit2 else set()))
+    if ev.action == "reject":
+        return None, ev.reason
+    content = ev.content
     out = {"subject": subj, "type": typ, "content": content, "quote": quote,
            "evidence_id": hit["id"], "hit": hit, "hit2": hit2,
            "evidence_id2": hit2["id"] if hit2 else None,
            "occurred_at": hit["occurred_at"], "confidence": conf, "category": category}
+    if ev.action == "review":
+        out["review"] = ev.reason                       # 归属拿不准：入库但 status=uncertain，等人看
     if VG.enabled():
         out["priority"] = VG.is_priority(subj, category, content, actor, quote=quote)
         out["old"] = bool(fact.get("_old"))
@@ -494,6 +503,8 @@ def main() -> int:
             if fid is None:
                 dup += 1
                 continue
+            if entity_gate.send_to_review(con, fid, ok):   # 实体归属拿不准 → 送审（uncertain，可恢复），不硬归给某个人
+                reasons["entity:review"] = reasons.get("entity:review", 0) + 1
             if target:                               # 2026-10-29 降级：只标「可能过时」，不封旧事（见 stale.py）
                 import stale
                 new_ext = con.execute("SELECT ext_id FROM facts WHERE id=?", (fid,)).fetchone()[0]

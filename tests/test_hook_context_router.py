@@ -55,15 +55,15 @@ class HookContextRouter(unittest.TestCase):
         self.assertTrue(query.endswith("做好了"))
 
     def test_camera_accessory_does_not_become_companion_robot(self):
-        query = "给机器人装个小麦克风，当成你的耳朵，做成桌面摆设"
-        wrong = "7/30 小测提议买陪伴机器人，带麦克风，后来改成手链挂饰"
-        right = "小测想做一个带麦克风的桌面摆设，给助理甲当耳朵"
+        query = "给机器人装个小望远镜，当成你的眼睛，做成桌面摆件"
+        wrong = "7/30 小测提议买陪伴机器人，带望远镜，后来改成胸针挂件"
+        right = "小测想做一个带望远镜的桌面摆件，给助理甲当耳朵"
         self.assertFalse(hook.entity_compatible(query, wrong))
         self.assertTrue(hook.entity_compatible(query, right))
 
     def test_named_companion_robot_is_not_blocked(self):
-        query = "陪伴机器人里面那个麦克风后来怎么说的"
-        candidate = "7/30 小测提议买陪伴机器人，带麦克风"
+        query = "陪伴机器人里面那个望远镜后来怎么说的"
+        candidate = "7/30 小测提议买陪伴机器人，带望远镜"
         self.assertTrue(hook.entity_compatible(query, candidate))
 
     def test_choice_uses_directly_related_preference(self):

@@ -230,7 +230,7 @@ class 指定人物召回(用空库):
     def test_只要她说的就不该带出我说的(self):
         import retrieve
         self.存一条事实(subject="tester", fact_type="preference",
-                   content="小测：我喜欢粉色奶茶")
+                   content="小测：我喜欢粉色豆浆")
         self.存一条事实(subject="claude", fact_type="preference",
                    content="助理甲：我喜欢粉色这个说法")
         r = retrieve.retrieve(self.con, "我喜欢什么颜色", who="tester")
@@ -274,7 +274,7 @@ class 召回要带回记忆类型(用空库):
 
     def test_遥测里的memory_type不该是空的(self):
         import retrieve
-        self.存一条事实(fact_type="preference", content="小测：我喜欢粉色奶茶")
+        self.存一条事实(fact_type="preference", content="小测：我喜欢粉色豆浆")
         retrieve.retrieve_logged(self.con, "我喜欢什么颜色")
         rows = self.con.execute(
             "SELECT memory_type FROM recall_hits").fetchall()

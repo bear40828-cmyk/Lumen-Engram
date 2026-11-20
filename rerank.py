@@ -70,19 +70,33 @@ PROMPT = """你在替一个 AI 判断：用户刚说的这句话，要不要从�
 from llm import load_env as _env  # noqa: E402,F401  共用配置读取（见 llm.py）
 
 
-def judge(query: str, candidates: list[str]) -> dict | None:
-    """返回 {"need": bool, "scores": [int,...]}，失败返回 None。"""
+ENTITY_NOTE = """
+当前这句里出现了专名「{names}」（库里自动整理出来的人名/宠物名/作品名/项目名）。
+命中该专名、且在说同一个人或同一件事的候选，优先于只是情绪或语气相近的候选：
+情绪词（生气、难过、喜欢）相同但没提到这个专名的，最多 3 分。"""
+
+
+def judge(query: str, candidates: list[str], *, entities: list[str] | None = None,
+          max_candidates: int | None = None, relevance_only: bool = False) -> dict | None:
+    """返回 {"need": bool, "scores": [int,...]}，失败返回 None。
+
+    entities（召回改造·第 1 层）：当前句命中的专名；给了就在提示词里加一段，让命中专名的候选排在情绪相近的前面。
+    max_candidates：候选上限，默认 12（旧行为）；召回改造把候选池放大到 20 时由调用方传。
+    query 里若带最近几轮对话，约定最后一行是当前消息（提示词里已写明）。"""
     if not candidates:
         return None
-    cands = candidates[:MAX_CANDIDATES]
+    cands = candidates[:(max_candidates or MAX_CANDIDATES)]
     try:
         # 主路由（DIGEST_*）失败会自动换备用（FALLBACK_*），见 llm.py；精排逻辑本身不变
         text = chat([
             {"role": "system", "content": "你只输出合法 JSON。"},
             {"role": "user", "content": PROMPT.format(
                 query=query,
-                cands="\n".join(f"[{i}] {c[:PER_CANDIDATE]}" for i, c in enumerate(cands)))},
-        ], purpose=_purpose(), max_tokens=120, timeout=TIMEOUT_S)
+                cands="\n".join(f"[{i}] {c[:PER_CANDIDATE]}" for i, c in enumerate(cands)))
+                + (ENTITY_NOTE.format(names="、".join(entities[:4])) if entities else "")
+                + ("\n本轮 need 仅用于观测，不是总否决：请先逐条判断是否为同一人同一事件。"
+                   "不要仅因语气是闲聊/焦虑而把直接相关记录降分；钉住也不代表相关。" if relevance_only else "")},
+        ], purpose=_purpose(), max_tokens=(120 if max_candidates is None else max(120, 40 + 7 * len(cands))), timeout=TIMEOUT_S)
         m = re.search(r"\{.*\}", text, re.S)
         got = json.loads(m.group(0) if m else text)
         raw = got.get("scores", {})

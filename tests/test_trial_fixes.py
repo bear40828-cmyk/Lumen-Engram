@@ -35,7 +35,7 @@ class SpeakerPrefixIsNotSubject(unittest.TestCase):
 
     def test_mention_far_from_the_start_does_not_reattribute(self):
         """助理的长句里末尾顺带提到她，不能因此算成她的事（大样本实测发现的误提升）。"""
-        h = hit(C, f"{NC}（2026-08-20 13:57）：说图中爪印五个脚趾，像用户爪子，不上色就素色，上色可以问商家，最后留给{NU}自己挑")
+        h = hit(C, f"{NC}（2026-08-20 13:57）：说图中爪印五个脚趾，像小狗爪子，不上色就素色，上色可以问商家，最后留给{NU}自己挑")
         self.assertFalse(metamem.belongs_to(h, U))
 
     def test_non_prefixed_wrong_subject_unchanged(self):

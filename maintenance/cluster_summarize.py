@@ -57,6 +57,47 @@ NEG = re.compile(r"(不|没|未|别|无|取消|放弃|算了)")
 NEG_FALSE = re.compile(r"(不错|不过|不仅|不只|不管|不如|不好意思|没事|无聊|无论|无所谓)")
 CHANGE = re.compile(r"(改成|改为|改考|换成|换了|改用|变成|更正|其实是|不是.{1,8}而是)")
 
+# ── 2026-11-03 夜间归纳质量三道闸（Claude 10-31 spec「夜间归纳质量」）──────────────────────────
+# 借 mem0 抽取提示词的两条：「Do NOT extract content too generic to be useful」「Never generalize concrete
+# information into a vague category」——落成代码：
+# (1) 空频率句：说了「多次/经常」，但后面只是「提到/刷/看/遇到 + 话题」或泛词（问题/情况/事物…），又没有任何
+#     偏好/看法/决定/具体结论 → 拒绝（「用户多次刷短视频」「多次提到小红书」）。
+# (2) 模糊主语/指代：「对方」「某人」「那个人」「某事物」「某个X」→ 拒绝（必须写明是谁/是什么）。
+# (3) 因果：归纳里有因果词，被引用的原话里得有一条自己就带因果表述、且和归纳说的是同一件事，否则拒绝。
+TOPIC_VERB = re.compile(r"(?:多次|经常|常常|总是|一直|每次|每天|天天|屡次|反复|老是|频繁|不断|时常|总会|常年|一再)"
+                        r"(?:在[^，。]{0,6})?(?:提到|提及|说到|聊到|谈到|讲到|关注|刷|看|去|收到|遇到|发现|尝试|问|询问|查|说起|点了?|用|玩)")
+VAGUE_NOUN = re.compile(r"(相关|话题|问题|情况|事物|东西|事情|内容|说法|方面|某事|一些事)")
+STANCE = re.compile(r"(喜欢|爱|讨厌|不喜欢|想(?!法)|希望|认为|觉得|决定|打算|计划|要求|不想|不要|不愿|怕|担心|嫌|腻|"
+                    r"称[^，。]{1,10}为|叫[^，。]{1,8}为|偏好|习惯[用在于]|坚持|拒绝|反对|同意|答应|表示不)")
+VAGUE_REF = re.compile(r"(对方|某人|某个人|某位|那个人|那人|有人|某事物|某事|某物|某个|某种|某些|某样)")
+CAUSAL = re.compile(r"(因为|因此|所以|导致|由于|以致|造成|致使|从而|使得|害得|搞得|结果是|是因为|之所以|因.{1,12}而)")
+CAUSAL_SRC = re.compile(r"(因为|因此|所以|导致|由于|以致|造成|致使|从而|使得|害得|搞得|结果|是因为|之所以|才(?:被|会|能|没|不|导致)|怪|不然|要不是)")
+
+
+def check_quality(summary: str, cited: list[dict]) -> str | None:
+    """三道闸：空频率句 / 模糊主语 / 无依据因果。返回拒绝原因或 None。"""
+    s = summary
+    m = VAGUE_REF.search(s)
+    if m:
+        return f"vague-subject:归纳里有「{m.group(1)}」，要写明是谁/是什么"
+    if FREQ_ANY.search(s) and not STANCE.search(s):
+        if TOPIC_VERB.search(s) or VAGUE_NOUN.search(s):
+            return "vague-frequency:只有「多次X」，没有具体内容/偏好/结论"
+        tail = FREQ_ANY.split(s, 1)[-1]
+        if re.fullmatch(r"[^，。；、]{0,4}[说叫喊发]?[“\"「]?[0-9A-Za-z]{1,6}[!?！？~～]*[”\"」]?。?", tail):
+            return "vague-frequency:只有「多次X」，没有具体内容/偏好/结论"
+    if CAUSAL.search(s):
+        sg = _bg(CAUSAL.sub("", s))
+        ok = False
+        for m_ in cited:
+            c = m_["content"]
+            if CAUSAL_SRC.search(c) and len(sg & _bg(c)) >= 3:
+                ok = True
+                break
+        if not ok:
+            return "causal-unsupported:归纳里有因果，被引用的原话里没有对应的因果表述"
+    return None
+
 
 def _np():
     try:
@@ -325,6 +366,9 @@ def check_summary(con, summary: str, cited_ids: list, members: list[dict]) -> tu
     freq = check_frequency(s, cited)
     if freq:
         return False, "rejected:" + freq
+    qual = check_quality(s, cited)
+    if qual:
+        return False, "rejected:" + qual
     src = " ".join(m["content"] for m in cited)
     if not _nums(s) <= _nums(src):
         return False, "rejected:归纳里有原话没有的数字"
@@ -340,6 +384,9 @@ def build_prompt(own: list[dict], hint: str | None = None) -> str:
             "只能用记录里出现过的信息，不许推测、不许加记录里没有的数字和日期；说「多次/经常」要真有多次）。\n"
             "写法：第三人称，用她的名字，不要用「我」；只写记录里明说的，不要补因果（不要写「因为…所以…」）；"
             "只出现过一次的事不要写成「习惯/总是」。\n"
+            "不要写空的频率句：只有「多次提到/刷/看X」而没有具体内容、偏好或结论的，输出 NONE；"
+            "不要用「对方」「某人」「某事物」这类模糊指代，必须写明是谁、是什么（具体的人名、AI 名……）；"
+            "具体的东西（名字、引语、数量）原样保留，不要概括成「相关话题」「一些问题」。\n"
             "如果只是同一个话题、但没有共同的结论，或者每条说的是不同的事，或者记录之间有矛盾，输出 NONE。\n"
             + (f"提示（词面规则看到的，不一定对）：{hint}。如果确实矛盾，conflict 填 true，summary 填 NONE。\n" if hint else "")
             + "只输出 JSON：{\"summary\":\"一句话或NONE\",\"ids\":[用到的记录编号],\"conflict\":是否发现记录互相矛盾(true/false)}\n\n"

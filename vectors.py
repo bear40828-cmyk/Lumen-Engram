@@ -131,6 +131,37 @@ def search(con, text: str, k: int = 5, floor: float = 0.5) -> list[dict]:
         return []
 
 
+def search_many(con, texts: list[str], k: int = 8, floor: float = 0.45) -> list[list[dict]]:
+    """一次嵌入多句（原句 + 改写问句 → 一次网络请求），各自取前 k 条。失败 → 每句都是空列表。
+    召回改造用：每轮只多一次嵌入调用，不是每个改写一次。"""
+    texts = [t for t in texts if t and t.strip()]
+    try:
+        ensure_table(con)
+        ids, mat = _matrix(con)
+        if not ids or not texts:
+            return [[] for _ in texts]
+        q = embed(texts)
+        if q is None:
+            return [[] for _ in texts]
+        out = []
+        for qi in range(len(texts)):
+            sims = mat @ q[qi]
+            hits = []
+            for i in np.argsort(-sims)[:k]:
+                if sims[i] < floor:
+                    break
+                r = con.execute(
+                    """SELECT id, ext_id, subject, content, status, user_pinned, valid_from,
+                              importance, confidence, layer, access_count, last_accessed
+                       FROM facts WHERE id = ?""", (ids[i],)).fetchone()
+                if r:
+                    hits.append(dict(r) | {"score": float(sims[i]), "my_stance": None, "via": "vector"})
+            out.append(hits)
+        return out
+    except Exception:                                        # noqa: BLE001
+        return [[] for _ in texts]
+
+
 if __name__ == "__main__":
     con = connect()
     if sys.argv[1:2] == ["build"]:

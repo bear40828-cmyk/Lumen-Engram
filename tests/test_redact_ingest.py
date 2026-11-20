@@ -78,7 +78,7 @@ class Ingest(unittest.TestCase):
         self.assertIn("〔已打码:sk:", c)
 
     def test_clean_text_unchanged(self):
-        t = "今天喝了奶茶 " * 5
+        t = "今天喝了豆浆 " * 5
         ev = add_evidence(self.con, source_kind="chat", source_actor="tester", source_locator="L3", content=t)
         self.assertEqual(self.con.execute("select content from evidence where id=?", (ev,)).fetchone()[0], t)
 

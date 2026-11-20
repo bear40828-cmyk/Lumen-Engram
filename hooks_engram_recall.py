@@ -179,7 +179,9 @@ def skip_input(text: str) -> str | None:
     if SYNTHETIC.search(text):
         return "系统／工具消息"
     if len(text) > MAX_AUTO_INPUT and not EXPLICIT_RECALL.search(text):
-        return "长篇粘贴且未要求回忆"
+        import flags
+        if not flags.on("RECALL_V2"):
+            return "长篇粘贴且未要求回忆"
     return None
 
 
@@ -286,6 +288,19 @@ def pinned_candidates(con, text: str, k: int = 3) -> list[dict]:
             scored.append((overlap, dict(row)))
     scored.sort(key=lambda x: -x[0])
     return [d | {"fact_id": d["id"]} for _, d in scored[:k]]
+
+
+def filter_pinned_by_relevance(query: str, hits: list[dict], scored: list[dict], judgment: dict | None) -> list[dict]:
+    """A confirmed/pinned instruction is not universally relevant; no ID blacklist.
+
+    Pins require an actual high per-candidate relevance score and compatibility.
+    On judge failure they fail closed; ordinary non-pinned fallbacks are unchanged.
+    """
+    scores = dict(zip((h["ext_id"] for h in scored), judgment.get("scores", []))) if judgment else {}
+    return [h for h in hits if not h.get("user_pinned") or
+            (scores.get(h["ext_id"], 0) >= 9
+             and entity_compatible(query, h.get("content") or "")
+             and owner_compatible(query, h.get("content") or ""))]
 
 
 def distinctive_terms(text: str) -> list[str]:
@@ -403,6 +418,48 @@ def entity_compatible(query: str, candidate: str) -> bool:
             return False
     return True
 
+# #90 同词异指：她问「Grok bot 的电脑有没有显卡」，库里「她的显卡是 4060」被当成答案注进来。
+# 当前句把某样东西明确挂在「别人」名下（你／他／Grok／别的 AI 的 X），且没说「我的」，
+# 候选又讲的是同一类东西、却没提那个人 → 说的不是同一个东西，不注。只拦设备/账号这类「各有各的」名词。
+OWNED_NOUNS = {
+    "hw": ("电脑", "显卡", "gpu", "笔记本", "显存", "内存", "机器", "主机", "服务器", "cpu", "硬盘", "vps"),
+    "phone": ("手机", "号码", "电话"),
+    "acct": ("账号", "帐号", "密码", "余额", "额度", "key", "钥匙"),
+}
+_OTHER_BASE = ("你", "他", "它", "grok", "bot", "gpt", "claude", "ai", "助手")
+
+
+def _other_owners() -> tuple:
+    names = [persona.get(k) for k in ("ENGRAM_NAME_CLAUDE", "ENGRAM_NAME_GPT", "ENGRAM_NAME_AGENT_C")]
+    return tuple(n.lower() for n in names if n) + _OTHER_BASE
+
+
+def _noun_group(word: str):
+    for g, ws in OWNED_NOUNS.items():
+        if any(w in word for w in ws):
+            return g
+    return None
+
+
+def owner_compatible(query: str, candidate: str) -> bool:
+    lines = [ln.strip() for ln in query.splitlines() if ln.strip()]
+    q = (lines[-1] if lines else query).lower()
+    c = candidate.lower()
+    if re.search(r"我(?:的|们的|家|这台|自己的)", q):
+        return True
+    owners = _other_owners()
+    for m in re.finditer(r"([a-z一-鿿]{1,12}?)\s*(?:的|'s|’s|上的|那台|这台)\s*([a-z一-鿿]{1,6})|在(他|它|你)(电脑|机器|服务器)", q):
+        owner = (m.group(1) or m.group(3) or "")
+        noun = (m.group(2) or m.group(4) or "")
+        hit = next((o for o in owners if owner.endswith(o)), None)
+        g = _noun_group(noun)
+        if not hit or not g:
+            continue
+        if any(w in c for w in OWNED_NOUNS[g]) and hit not in c:
+            return False
+    return True
+
+
 CHOICE_ACTION = re.compile(r"(点个|点一|吃|喝|买|选|穿|用|带|要不要|可以.+吗)")
 PREFERENCE_CUE = re.compile(
     r"(喜欢|不喜欢|爱吃|要配|不要|偏好|习惯|只要|最爱|配(?:米饭|饭)|要(?:椒盐|辣|甜|咸|冰|热))")
@@ -464,19 +521,54 @@ def contextual_candidates(con, query: str, k: int = 3) -> list[dict]:
     return found[:k]
 
 
+def record_frontgate_skip(reason: str) -> None:
+    """Audit only the reason, never the synthetic payload; no candidates/model calls."""
+    log("不查 | [frontgate] | " + reason)
+    con = None
+    try:
+        from store.store import connect
+        from retrieve import Result, log_recall
+        con = connect()
+        log_recall(con, "[frontgate]", Result(False, reason=reason), decision="skip",
+                   reason="frontgate:" + reason, selected=set())
+    except Exception:  # telemetry must not break the zero-output exit
+        pass
+    finally:
+        if con is not None:
+            con.close()
+
+
 def main() -> int:
     try:
         data = json.loads(sys.stdin.read() or "{}")
     except Exception:
         return 0
 
-    text = incoming(data)
+    # Apply the structural/ack gate before routing, entity lookup, retrieval or models.
+    import recall_flow as RF
+    raw = strip_wrappers(incoming(data))
+    text = RF.clean_message(raw) or ""
+    blocked = RF.frontgate_reason(raw) or RF.frontgate_reason(text)
+    if blocked:
+        record_frontgate_skip(blocked)
+        return 0
     if not text or len(text) > 2000:
         return 0
     skipped = skip_input(text)
     if skipped:
         log(f"不查 | {text[:40]} | {skipped}")
         return 0
+
+    try:
+        import flags as _flags
+        v2 = _flags.on("RECALL_V2")
+        if not v2 and _flags.raw("RECALL_V2") == "hybrid":
+            # 混合：有直通专名 / 问到具体作品 → 新路径；回忆口吻和其余句子走旧路径原样（回放：回忆句交给 v2 会掉召回）
+            v2 = hybrid_trigger(text) == "work" or has_direct_entity(text)
+    except Exception:                                        # noqa: BLE001
+        v2 = False
+    if v2:                                                   # 召回改造：规则路由不再有否决权（见 recall_flow.py）
+        return main_v2(data, text)
 
     pre_skipped = pre_recall_skip(text)
     if pre_skipped:
@@ -574,11 +666,22 @@ def main() -> int:
     # 先让模型判（BMAM 的前额叶精排，见 engram/rerank.py）：要不要翻旧账、每条对不对得上。
     # 7 分以上才算对得上，按分排。模型挂了、超时了，才退回上面那道关键词闸。
     how = "关键词闸"
+    judge_started = time.perf_counter()
     try:
         from rerank import judge
         j = judge(search_text, [echo_prefix(h) + (h.get("content") or "") for h in r.hits])
     except Exception:                                        # noqa: BLE001
         j = None
+    # Cache existing ordinary-hook judgments for zero-extra-API offline replay.
+    try:
+        from retrieve import Step
+        r.steps.append(Step("judge_scores", len(j.get("scores", [])) if j else 0, 0.0, False, False,
+                            json.dumps({"need": j.get("need") if j else None,
+                                        "scores": j.get("scores", []) if j else [],
+                                        "rerank_attempts": 1,
+                                        "rerank_ms": round((time.perf_counter() - judge_started) * 1000, 3)}, ensure_ascii=False)))
+    except Exception:
+        pass
     if j is not None:
         forced = [
             i for i, h in enumerate(r.hits)
@@ -613,6 +716,7 @@ def main() -> int:
                     if (relevant(h) or deterministic_relevance(
                         search_text, h.get("content") or ""))
                     and entity_compatible(search_text, h.get("content") or "")] if marks else []
+    on_topic = filter_pinned_by_relevance(search_text, on_topic, r.hits, j)
     if not on_topic:
         if EXPLICIT_RECALL.search(text):
             print(persona.get("ENGRAM_MISS_HINT") or "【记忆库】没勾到。她在说旧事：先自己翻（聊天原始记录、会话存档、engram evidence），翻不到再说想不起来或问她，别猜。")
@@ -620,8 +724,22 @@ def main() -> int:
         log(f"查到但不相关，不注（{how}） | {text[:40]} | 指向词{marks} | {len(r.hits)}条")
         return 0
 
-    # 刚注进去的不重复注。判的是「这条记录」，不是「这个词」。
+    return _inject(con, r, text, on_topic, how, used_context, tel)
+
+
+def _inject(con, r, text, on_topic, how, used_context, tel) -> int:
+    """注入这一半：去重（刚注过的不重复）→ 新事盖旧事 → 排版 → 出口脱敏 → 打印 → 遥测。
+    旧路径（main）和召回改造路径（main_v2）共用，行为不变。"""
+    # 刚注进去的不重复注（判记录不是词）。Serein：冷却赢家被跳过不从池子补位——
+    # 这里 on_topic 已是精排选定的 ≤MAX_HITS 条，过滤冷却后不回池子再取，已对齐不补位。
     fresh = recently_injected(con)
+    owned_out = [h for h in on_topic if not owner_compatible(text, h.get("content") or "")]
+    if owned_out:
+        log(f"同词异指，不注 {len(owned_out)} 条 | {text[:40]}")
+    on_topic = [h for h in on_topic if h not in owned_out]
+    if not on_topic:
+        tel(r, "skip", f"owner_mismatch:{len(r.hits)}")
+        return 0
     hits = [h for h in on_topic if h.get("ext_id") not in fresh]
     if not hits:
         tel(r, "skip", f"recently_injected:{len(r.hits)}")
@@ -700,6 +818,108 @@ def main() -> int:
         f"（跳过刚注过的 {len(r.hits) - len(hits)} 条）"
         f" | {text[:40]} | 词{r.terms} | 层{r.layers_read}")
     return 0
+
+
+HYBRID_RECALL = re.compile(r"(之前|以前|昨天|前天|上次|上回|那时|那时候|当时|那天|还记得|你记得|记不记得|记得吗|你说过|我说过|我跟你说过)")
+HYBRID_WORK = re.compile(
+    r"((一|那|这|有)(个|部|本|首|款|篇|集|张)[^，。！？\n]{0,12}(小说|电影|书|剧|游戏|歌|动漫|番|漫画|综艺|节目|视频|帖子|文章|作品)"
+    r"|(小说|电影|书|剧|游戏|歌|动漫|漫画|综艺|作品)(叫|是)?(什么|啥|哪)"
+    r"|那个谁|那本|那部|那首|那篇)")
+
+
+def hybrid_trigger(text: str) -> str:
+    """混合路由的情景触发：返回 'recall' / 'work' / ''。"""
+    t = text or ""
+    if HYBRID_RECALL.search(t):
+        return "recall"
+    if HYBRID_WORK.search(t):
+        return "work"
+    return ""
+
+
+def has_direct_entity(text: str) -> bool:
+    """混合路由用：清洗后的句子是否命中 entity_index 的直通专名。任何失败 → False（走旧路径）。"""
+    sys.path.insert(0, ENGRAM)
+    try:
+        import recall_flow as RF
+        import entities as ENT
+        from store.store import connect
+        clean = RF.clean_message(strip_wrappers(text))
+        if not clean:
+            return False
+        con = connect()
+        try:
+            return any(e["direct"] for e in ENT.match(con, clean))
+        finally:
+            con.close()
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def main_v2(data: dict, text: str) -> int:
+    """召回改造路径（开关 ENGRAM_RECALL_V2，默认关）。四层：专名直通 → 每轮 FTS+向量 → 池≤20 精排 → ≤2 条注入。
+    规则路由（Router / 无指向性词 / QUESTION）不再有否决权；寒暄由精排 need=false 拦。
+    只读不写（除遥测）；任何异常静默退出，跟旧路径一样。"""
+    sys.path.insert(0, ENGRAM)
+    try:
+        import recall_flow as RF
+        from retrieve import Result, Step, log_recall
+        from store.store import connect
+    except Exception as e:                                   # noqa: BLE001
+        log(f"v2 import 失败：{e}")
+        return 0
+    clean = RF.clean_message(strip_wrappers(text))
+    if not clean:
+        log(f"不查 | {text[:40]} | 服务器任务/纯包装，不是她的话")
+        return 0
+    ctx = recent_dialogue_context(data, clean)[-RF.CONTEXT_TURNS:]
+    try:
+        con = connect()
+    except Exception as e:                                   # noqa: BLE001
+        log(f"v2 连库失败：{e}")
+        return 0
+
+    def tel(r, decision, reason, selected=None):
+        try:
+            log_recall(con, clean, r, decision=decision, reason=reason, selected=selected)
+        except Exception as e:                               # noqa: BLE001
+            log(f"遥测失败：{e}")
+
+    marks = distinctive_terms(clean)
+    explicit = bool(EXPLICIT_RECALL.search(clean) or HYBRID_RECALL.search(clean))
+
+    try:
+        from rerank import judge
+        pinned = pinned_candidates(con, clean)
+        # Serein：精排失败不回退关键词闸（不再传 fallback_gate）
+        import flags
+        full_on = flags.on("RECALL_V2")
+        compatibility = (lambda q, c: entity_compatible(q, c) and owner_compatible(q, c)) if full_on else entity_compatible
+        f = RF.recall(con, clean, ctx, extra=pinned, judge=judge, explicit=explicit, compat=compatibility,
+                      forced_fn=deterministic_relevance, full_on=full_on)
+    except Exception as e:                                   # noqa: BLE001
+        log(f"v2 召回失败：{e}")
+        return 0
+    r = Result(True, depth="deep", terms=[e["term"] for e in f.entities] or list(marks), task_type="召回v2",
+               hits=f.pool, mode="hybrid", reason=f.how)
+    r.steps.append(Step("flow", len(f.pool), 0.0, False, False,
+                        (json.dumps({"calls": f.calls, "timings_ms": f.timings}, ensure_ascii=False) + "；" + "；".join(f.trace))[:300]))
+    # Cache ordinary live judgments for future zero-extra-call replay, not fact writes.
+    r.steps.append(Step("judge_scores", len(f.pool), 0.0, False, False,
+                        json.dumps({"scores": f.judge_scores, "need": f.model_need}, ensure_ascii=False)))
+    if not f.pool:
+        if explicit:
+            print("【记忆库】已查，没有可靠记录；别猜，直说想不起来或问她。")
+        tel(r, "skip", "no_hits")
+        log(f"查了没有 | {text[:40]} | v2")
+        return 0
+    if not f.selected:
+        if explicit:
+            print(persona.get("ENGRAM_MISS_HINT") or "【记忆库】没勾到。她在说旧事：先自己翻（聊天原始记录、会话存档、engram evidence），翻不到再说想不起来或问她，别猜。")
+        tel(r, "skip", f"v2:{f.how}:{len(f.pool)}")
+        log(f"v2 不注（{f.how}） | {text[:40]} | {'；'.join(f.trace)[:120]} | {len(f.pool)}条")
+        return 0
+    return _inject(con, r, text, f.selected, "v2:" + f.how, bool(ctx), tel)
 
 
 if __name__ == "__main__":

@@ -211,12 +211,13 @@ def by_rarity(con, terms: list[str]) -> list[str]:
     结果三条命中一条都不是公园——不是模糊轮廓，是翻错屋子。
     难点在路由和怎么让 AI 主动想起，这就是路由那半。
     """
-    # 满库都是的词（「件事」460 条）直接扔掉，它只会把额度占满。
-    terms = [t for t in terms if best_form(con, t)[1] <= TOO_COMMON] or terms
     forms = [best_form(con, t) for t in terms]
-    # 库里根本没有的（0 条）排最后：查了也白查，但也不能直接扔——
-    # 万一是新东西，让它排在后面自然被预算挤掉就行。
+    # Corpus-aware typo pruning belongs here (router has no database).
+    # Keep unseen English/proper long names for semantic retrieval; only absent 2-Han terms drop.
+    forms = [(t, n) for t, n in forms if not (n == 0 and re.fullmatch(r"[一-鿿]{2}", t))]
+    forms = [(t, n) for t, n in forms if n <= TOO_COMMON] or forms
     return [t for t, n in sorted(forms, key=lambda x: (x[1] == 0, x[1], -len(x[0])))]
+
 
 
 # 抽取器整理出来的「事」单独算一层，排在最前面。
@@ -446,7 +447,7 @@ def log_recall(con, text: str, r: Result, *, decision: str | None = None,
                         layer=h.get("layer"), memory_type=h.get("fact_type"),
                         snippet_chars=len(h.get("content") or ""),
                         selected=(h["ext_id"] in selected) if selected is not None
-                        else i <= 3)
+                        else decision == "recall" and i <= 3)
     if run.run_id:
         for i, st in enumerate(r.steps, 1):
             con.execute(

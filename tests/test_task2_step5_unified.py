@@ -22,14 +22,14 @@ VER = [{"verification_status": "verified"}]
 SAMPLES = ["小测（2026-10-20 10:00）：我考某大学，报计算机技术",
            "小测（2026-10-20 10:00）：以后一律纯文本回复，这是说好的规矩",
            "小测（2026-10-20 10:00）：嗯嗯",
-           "小测（2026-10-20 10:00）：我最爱吃米线",
+           "小测（2026-10-20 10:00）：我最爱吃面片",
            "小测（2026-10-20 10:00）：今天无聊",
            "小测（2026-10-20 10:00）：😂😂"]
 
 
 def reply(**kw):
     base = {"promote": True, "fact_type": "preference", "subject": "tester",
-            "fact_key": None, "slots": ["偏好"], "confidence": 0.8, "quote": "我最爱吃米线"}
+            "fact_key": None, "slots": ["偏好"], "confidence": 0.8, "quote": "我最爱吃面片"}
     base.update(kw)
     return json.dumps(base, ensure_ascii=False)
 

@@ -23,8 +23,8 @@ hook = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(hook)
 
 NOW = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.timezone.utc)
-HER = "我不在家，也不在宿舍啊，我在图书馆"
-KW = dict(content="她今天不在宿舍，在图书馆", wrong="她在宿舍", topic="所在位置", quote="我不在家，也不在宿舍啊")
+HER = "我不在家，也不在寝室啊，我在图书馆"
+KW = dict(content="她今天不在寝室，在图书馆", wrong="她在寝室", topic="所在位置", quote="我不在家，也不在寝室啊")
 
 
 class Base(unittest.TestCase):
@@ -63,19 +63,19 @@ class CorrectionWrite(Base):
         self.assertTrue(ok, msg)
         f = self.facts()[0]
         self.assertEqual((f["status"], f["user_pinned"], f["subject"]), ("confirmed", 1, persona.USER))
-        self.assertTrue(f["content"].startswith("【她纠正过我·2026-10-28·所在位置】我以为她在宿舍；其实她今天不在宿舍"), f["content"])
+        self.assertTrue(f["content"].startswith("【她纠正过我·2026-10-28·所在位置】我以为她在寝室；其实她今天不在寝室"), f["content"])
         link = self.con.execute("SELECT evidence_id FROM fact_evidence WHERE fact_id=?", (f["id"],)).fetchall()
         self.assertEqual([r[0] for r in link], [ev])
         # 不是自记：没有 fact_origin 行，也不占自记名额
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM fact_origin").fetchone()[0], 0)
         row = json.loads(self.cj.read_text(encoding="utf-8").splitlines()[0])
         self.assertEqual((row["topic"], row["keep"], row["via"]), ("所在位置", True, "engram_remember"))
-        self.assertIn("不在宿舍", row["right"])
+        self.assertIn("不在寝室", row["right"])
 
     def test_found_in_transcript_stores_her_evidence_and_collect_rescan_is_noop(self):
         f = self.tdir / "s.jsonl"
         f.write_text("\n".join(json.dumps(m, ensure_ascii=False) for m in [
-            {"type": "assistant", "message": {"role": "assistant", "content": "好，回宿舍再说"}, "timestamp": "2026-10-28T11:00:00Z"},
+            {"type": "assistant", "message": {"role": "assistant", "content": "好，回寝室再说"}, "timestamp": "2026-10-28T11:00:00Z"},
             {"type": "user", "message": {"role": "user", "content": HER}, "timestamp": "2026-10-28T11:01:00Z"},
         ]) + "\n", encoding="utf-8")
         ok, msg = self.corr()
@@ -91,10 +91,10 @@ class CorrectionWrite(Base):
     def test_only_assistant_said_it_is_refused(self):
         f = self.tdir / "s.jsonl"
         f.write_text(json.dumps({"type": "assistant", "message": {"role": "assistant",
-                                 "content": "你今天不在家，也不在宿舍啊，我记住了"}, "timestamp": "2026-10-28T11:00:00Z"},
+                                 "content": "你今天不在家，也不在寝室啊，我记住了"}, "timestamp": "2026-10-28T11:00:00Z"},
                                 ensure_ascii=False) + "\n", encoding="utf-8")
         self.her_evidence(body="今天天气好", actor="claude")
-        ok, msg = self.corr(quote="不在家，也不在宿舍啊")
+        ok, msg = self.corr(quote="不在家，也不在寝室啊")
         self.assertFalse(ok)
         self.assertIn("找不到", msg)
         self.assertEqual(self.facts(), [])
@@ -118,7 +118,7 @@ class CorrectionWrite(Base):
 
     def test_invented_number_is_refused(self):
         self.her_evidence()
-        ok, msg = self.corr(content="她今天不在宿舍，在图书馆三楼305")
+        ok, msg = self.corr(content="她今天不在寝室，在图书馆三楼305")
         self.assertFalse(ok)
         self.assertIn("数字", msg)
 
@@ -142,9 +142,9 @@ class CorrectionWrite(Base):
                  ("耳机是蓝牙的不是有线的", "她的耳机是蓝牙的", "我以为耳机有线", "耳机"),
                  ("高铁票已经改签了啊", "她的高铁票已经改签", "我以为没改签", "高铁"),
                  ("考试周只有三门不是五门", "她考试周三门课", "我以为要考很多门", "考试"),
-                 ("同事周末才回来", "同事周末才回来", "我以为同事在", "同事"),
+                 ("邻居周末才回来", "邻居周末才回来", "我以为邻居在", "邻居"),
                  ("快递放在菜鸟驿站了", "快递放在菜鸟驿站", "我以为放门口", "快递"),
-                 ("奶茶只喝少糖的", "她奶茶只喝少糖", "我以为全糖", "奶茶"),
+                 ("豆浆只喝少糖的", "她豆浆只喝少糖", "我以为全糖", "豆浆"),
                  ("课表周四全天没课", "她周四全天没课", "我以为周四有课", "课表"),
                  ("房租是押一付三的", "房租押一付三", "我以为月付", "房租"),
                  ("体检结果完全正常", "她体检结果正常", "我以为有问题", "体检"),
@@ -166,7 +166,7 @@ class CorrectionWrite(Base):
     def test_correction_is_found_by_hook_pinned_layer(self):
         self.her_evidence()
         self.assertTrue(self.corr()[0])
-        got = hook.pinned_candidates(self.con, "我今天不在宿舍你怎么又说回宿舍再说")
+        got = hook.pinned_candidates(self.con, "我今天不在寝室你怎么又说回寝室再说")
         self.assertEqual(len(got), 1)
         self.assertIn("她纠正过我", got[0]["content"])
 
@@ -196,18 +196,18 @@ class AssistantSay(unittest.TestCase):
 
     def test_detects_utterance_form_of_claude_only(self):
         c = persona.CLAUDE
-        self.assertTrue(echo.is_assistant_say(self.h(c, "助手（2026-09-01 14:02）：说开会别折腾电脑，给了一个脚本文件，让回家再用")))
-        self.assertTrue(echo.is_assistant_say(self.h(c, "我：这个想法不错 反正自己掌握的技能谁也拿不走")))
-        self.assertFalse(echo.is_assistant_say(self.h(c, "助手定下硬规矩：只有她说话才算唤醒源")))
-        self.assertFalse(echo.is_assistant_say(self.h(persona.USER, "用户（2026-09-15 12:33）：上个月同事吵起来")))
-        self.assertFalse(echo.is_assistant_say(self.h(persona.USER, "我：不在宿舍")))
+        self.assertTrue(echo.is_assistant_say(self.h(c, "助理甲（2026-09-01 14:02）：说上课别折腾电脑，给了一个bat文件，让回寝室再用")))
+        self.assertTrue(echo.is_assistant_say(self.h(c, "我：这心态好 反正点在自己身上的技能谁也拿不走")))
+        self.assertFalse(echo.is_assistant_say(self.h(c, "助理甲定下硬规矩：只有她说话才算点名源")))
+        self.assertFalse(echo.is_assistant_say(self.h(persona.USER, "小测（2026-09-15 12:33）：大二国庆期间邻居吵起来")))
+        self.assertFalse(echo.is_assistant_say(self.h(persona.USER, "我：不在寝室")))
 
     def test_annotate_flags_prefix_and_demote_is_stable_and_lossless(self):
         c = persona.CLAUDE
-        hits = [self.h(c, "助手（2026-09-01 14:02）：让回家再用", ext_id="a"),
-                self.h(persona.USER, "用户平时待在公司，住处只是晚上回去睡觉", ext_id="b"),
-                self.h(c, "助手决定不做套一层 OpenCode 的方案", ext_id="c"),
-                self.h(persona.USER, "用户表示不住宿舍", ext_id="d")]
+        hits = [self.h(c, "助理甲（2026-09-01 14:02）：让回寝室再用", ext_id="a"),
+                self.h(persona.USER, "小测平时待在出租屋，寝室只是晚上回去睡觉", ext_id="b"),
+                self.h(c, "助理甲决定不做套一层 OpenCode 的方案", ext_id="c"),
+                self.h(persona.USER, "小测表示不住寝室", ext_id="d")]
         echo.annotate_say(hits)
         self.assertEqual([h["assistant_say"] for h in hits], [True, False, False, False])
         self.assertIn("〔我说的〕", hook.echo_prefix(hits[0]))
@@ -216,7 +216,7 @@ class AssistantSay(unittest.TestCase):
         self.assertEqual([h["ext_id"] for h in hits], ["b", "c", "d", "a"])   # 稳定；一条都没丢
 
     def test_pinned_correction_is_never_assistant_say(self):
-        fix = self.h(persona.USER, "【她纠正过我·2026-10-28·所在位置】我以为她在宿舍；其实她不在宿舍", user_pinned=1)
+        fix = self.h(persona.USER, "【她纠正过我·2026-10-28·所在位置】我以为她在寝室；其实她不在寝室", user_pinned=1)
         echo.annotate_say([fix])
         self.assertFalse(fix["assistant_say"])
 

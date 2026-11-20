@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import re
 import unicodedata
 
@@ -38,8 +39,8 @@ ROLE_ALLOWED = {
     "gpt": set(AI_CATEGORIES),
     persona.AGENT_C: set(AI_CATEGORIES),
 }
-MAX_PER_SLICE = 3
-MAX_PER_SLICE_PRIORITY = 5       # 超过 3 条后，只有「高置信的她的决定/规矩/助手的承诺」还能再进，总共不超过 5 条
+MAX_PER_SLICE = int(os.environ.get("ENGRAM_MAX_PER_SLICE", 3))   # 评测整段入库时调大；缺省不变
+MAX_PER_SLICE_PRIORITY = int(os.environ.get("ENGRAM_MAX_PER_SLICE_PRIORITY", 5))       # 超过 3 条后，只有「高置信的她的决定/规矩/助手的承诺」还能再进，总共不超过 5 条
 # 提示词输出里没有 type（闸的 PROMPT_GATE 只要 category）；from_evidence.check 需要 type，缺了就按类别补
 TYPE_FOR_CATEGORY = {"preference": "preference", "life_change": "episodic", "correction": "procedural",
                      "decision": "procedural", "commitment": "procedural", "self_correction": "procedural",

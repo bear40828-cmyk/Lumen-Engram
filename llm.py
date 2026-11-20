@@ -46,6 +46,8 @@ PURPOSE_MODEL_VARS = {
     "consolidate": ("CLUSTER_MODEL", "EXTRACT_MODEL"),
     # 任务三：RERANK_FLASH 开了，rerank.py 用这个用途；没配 RERANK_FLASH_MODEL 就退回 RERANK_MODEL / DIGEST_MODEL（行为不变）
     "rerank_flash": ("RERANK_FLASH_MODEL", "RERANK_MODEL"),
+    # 召回改造（第 3 层）：把含糊的话改写成 2~3 个具体检索问句；便宜档就够。没配 REWRITE_MODEL 退回 RERANK_FLASH_MODEL / RERANK_MODEL
+    "rewrite": ("REWRITE_MODEL", "RERANK_FLASH_MODEL", "RERANK_MODEL"),
     # 2026-10-29: second-opinion pass of extract/timeline.py (ENGRAM_TIMELINE_CONFIRM=1); unset -> EXTRACT_MODEL / DIGEST_MODEL
     "timeline_confirm": ("TIMELINE_CONFIRM_MODEL", "EXTRACT_MODEL"),
 }

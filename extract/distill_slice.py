@@ -58,7 +58,7 @@ CAP_HOURS = float(os.environ.get("ENGRAM_SLICE_CAP_HOURS", 6))
 CAP_MSGS = int(os.environ.get("ENGRAM_SLICE_CAP_MSGS", 300))
 SETTLE_MIN = 5
 CONTEXT_MSGS = 6
-MAX_CHUNKS = 8
+MAX_CHUNKS = int(os.environ.get("ENGRAM_SLICE_MAX_CHUNKS", 8))   # 评测整段入库时调大；缺省不变
 BACKOFF_MIN = (10, 20, 40, 60, 60)
 MAX_ATTEMPTS = 5
 DEAD_AFTER_H = 24
@@ -307,6 +307,8 @@ def _write_chunk(con, key, chunk, facts, run_id, kind, c, meta, t0, n_chunks, *,
             if fid is None:
                 dup += 1
                 continue
+            import entity_gate
+            entity_gate.send_to_review(con, fid, ok)    # 实体归属拿不准 → uncertain 待审
             if target:                               # 只标「可能过时」（stale.check 里还有主体/本人原话/槽的硬卡）
                 import stale
                 new_ext = con.execute("SELECT ext_id FROM facts WHERE id=?", (fid,)).fetchone()[0]

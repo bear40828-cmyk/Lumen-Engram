@@ -299,6 +299,8 @@ def apply(con, rows: list[dict], results: list[dict], batch: str, out_dir: Path)
                 if fid is None:
                     stat["dup"] += 1
                 else:
+                    import entity_gate
+                    entity_gate.send_to_review(con, fid, k)  # 实体归属拿不准 → uncertain 待审
                     record_class(con, fid, k["type"], k["confidence"], EXTRACTOR)
                     stat["new_facts"] += 1
             full = dict(con.execute("SELECT * FROM facts WHERE id=?", (row["id"],)).fetchone())

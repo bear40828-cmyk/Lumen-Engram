@@ -350,7 +350,7 @@ class Main(unittest.TestCase):
         p = ROOT / "maintenance" / "nightly-cluster.sh"
         self.assertTrue(p.exists() and os.access(p, os.X_OK))
         txt = p.read_text(encoding="utf-8")
-        self.assertNotIn("crontab -", txt.replace("crontab 由助手装", ""))
+        self.assertNotIn("crontab -", txt.replace("crontab 由助理甲装", ""))
         self.assertIn(".ingest.lock", txt)
         self.assertIn("--apply", txt)
 
