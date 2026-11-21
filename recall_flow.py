@@ -340,7 +340,8 @@ def order_by_xscore(pool: list[dict], xs: list[float], *, eps: float = 0.1) -> l
     def when(h: dict) -> str:
         return (h.get("valid_from") or h.get("occurred_at") or h.get("created_at") or "")
 
-    idx = sorted(range(len(pool)), key=lambda i: when(pool[i]), reverse=True)
+    idx = sorted(range(len(pool)), key=lambda i: -(xs[i] or 0.0))           # 同日期（或都没日期）时仍按分
+    idx = sorted(idx, key=lambda i: when(pool[i]), reverse=True)
     return sorted(idx, key=lambda i: -math.floor((xs[i] or 0.0) / eps))
 
 
